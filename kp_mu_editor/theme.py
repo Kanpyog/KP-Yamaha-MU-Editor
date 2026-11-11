@@ -109,6 +109,8 @@ QSpinBox::up-button { subcontrol-origin:border;subcontrol-position:top right;wid
 QSpinBox::down-button { subcontrol-origin:border;subcontrol-position:bottom right;width:21px;border-left:1px solid @border@;border-bottom-right-radius:5px;background:@raised@; }
 QSpinBox::up-arrow { image:url(ASSETS/upARROW.svg);width:10px;height:8px; }
 QSpinBox::down-arrow { image:url(ASSETS/downARROW.svg);width:10px;height:8px; }
+/* Qt 6.12 clips the edit field when hidden spin buttons are right-aligned. */
+DragSpinBox::up-button,DragSpinBox::down-button { subcontrol-position:center; }
 QComboBox::drop-down { subcontrol-origin:padding;subcontrol-position:top right;width:22px;border:0; }
 QComboBox::down-arrow { image:url(ASSETS/downARROW.svg);width:10px;height:8px; }
 QCheckBox::indicator,QAbstractItemView::indicator { width:14px;height:14px;background:@input@;border:1px solid @muted@;border-radius:3px; }

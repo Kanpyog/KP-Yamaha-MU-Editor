@@ -69,6 +69,24 @@ class PresentationTests(unittest.TestCase):
             self.assertTrue(control.lineEdit().font().bold());self.assertEqual(control.value(),12)
             self.assertEqual(w.pages[2].graph.values,before)
 
+    def test_numeric_fields_keep_a_usable_width_in_both_themes(self):
+        w=self.w
+        w.navigate(2)
+        controls=[
+            *w.master.controls.values(),
+            w.pages[2].form.controls['bank_lsb'],
+            w.octave,
+            w.velocity,
+        ]
+        for theme in ('light','dark','light'):
+            if w.theme!=theme:
+                w.theme_button.click()
+            self.app.processEvents()
+            for control in controls:
+                with self.subTest(theme=theme,text=control.text()):
+                    editor=control.lineEdit()
+                    self.assertGreaterEqual(editor.contentsRect().width(),control.width()//2)
+
     def test_midi_log_button_opens_correct_tab_and_preserves_log(self):
         w=self.w;w.log('retain this entry');w.settings.tabs.setCurrentIndex(0)
         w.midi_log_button.click();self.app.processEvents()

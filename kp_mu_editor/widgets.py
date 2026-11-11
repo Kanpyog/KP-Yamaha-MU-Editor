@@ -55,7 +55,10 @@ class DragSpinBox(QSpinBox):
         super().__init__(parent);self._press=None;self._dragging=False
         self.setKeyboardTracking(True);self.setAccelerated(True)
         self.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
-        self.setFixedSize(140,34);self.lineEdit().installEventFilter(self)
+        self.setFixedSize(140,34)
+        editor=self.lineEdit()
+        editor.setTextMargins(5,0,5,0)
+        editor.installEventFilter(self)
         self.setToolTip('上下にドラッグして変更 / ダブルクリックで数値入力 / Shift:細かく / Ctrl:速く')
         self.setCursor(Qt.CursorShape.SizeVerCursor)
 
