@@ -103,6 +103,7 @@
   "比較 A を記憶しました。": "Stored comparison A.",
   "A/B比較": "A/B comparison",
   "モード変更": "Mode change",
+  "このDrum Setupを共有するパートのキットも変更され、ノート別設定が初期化されます。変更しますか？": "Changing this kit also changes the kit for parts sharing this Drum Setup and resets per-note settings. Continue?",
   "診断ログを書き出す": "Export diagnostic logs",
   "診断ログ (*.zip)": "Diagnostic logs (*.zip)",
   "診断ログをまとめています…": "Preparing diagnostic logs...",

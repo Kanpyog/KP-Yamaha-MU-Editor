@@ -51,7 +51,7 @@ def clean(name):
     return re.sub(r'\s+',' ', re.sub(r'[†*]','',name)).strip()
 
 # Read printed grid boundaries so continuation headers cannot shift Program.
-from voice_table import extract_xg_voices
+from voice_table import extract_xg_voices, extract_tg300b_voices, extract_tg300b_kits
 voices, voice_page_counts = extract_xg_voices(pdf)
 
 # GM2 rows use an explicit program-number guide, including the page continuation.
@@ -70,6 +70,8 @@ for page_index in (65,66):
             if namewords and element:
                 title=' '.join(w[4] for w in sorted(namewords,key=lambda w:w[0]))
                 voices.append(dict(msb=msb,lsb=lsb,program=int(g[4])-1,name=title,elements=element,generation=4,map='common',mode='GM2',source='Yamaha MU500 manual p'+str(page_index+1)))
+
+voices.extend(extract_tg300b_voices(pdf))
 
 # Official effect type lists: two hexadecimal cells followed by the type name.
 official_fx={}
@@ -170,6 +172,7 @@ for page_index in range(81,87):
         if key in seen:continue
         seen.add(key)
         kits.append(dict(msb=msb,lsb=lsb,program=int(word[4])-1,name=clean(title),generation=4 if mapping=='native' else get_generation(title),map=mapping,mode='GM2' if page_index==86 else 'XG',source='Yamaha MU500 manual p'+str(page_index+1)))
+kits.extend(extract_tg300b_kits(pdf))
 data['kits']=[normalize_voice(row) for row in kits]
 data['provenance']={'yamaha':'https://data.yamaha.com/files/download/other_assets/8/316818/MU500J.PDF',
                     'qxgedit':'https://github.com/rncbc/qxgedit/blob/master/src/XGParam.cpp',

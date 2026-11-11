@@ -6,7 +6,7 @@ import heapq,json,queue,threading,time,itertools,traceback
 from io import BytesIO
 from PySide6.QtCore import QObject, Signal
 from .winmm import Transport
-from .protocol import parse, request, is_setup_packet
+from .protocol import parse, request, is_setup_packet, TG300B_SYSTEM_ON
 from .smf import read_smf
 from .schema import CC_PART
 from .catalog import Catalog
@@ -345,7 +345,7 @@ class Engine(QObject):
         if self._thread:self._thread.join(timeout=4)
 
 
-def load_midi(path,keep_setup=True):
+def load_midi(path,keep_setup=True,*,allow_tg300b=False):
     mido=midi_library()
     from mido.messages.specs import SPEC_BY_STATUS
     lengths = {status: spec['length'] for status, spec in SPEC_BY_STATUS.items()}
@@ -368,7 +368,8 @@ def load_midi(path,keep_setup=True):
                     xg_reset = (packet is not None and packet.model == 0x4C
                                 and not packet.bulk and packet.address == (0, 0, 0x7E)
                                 and packet.data == b'\x00')
-                    if not (standard or xg_reset or is_setup_packet(packet)):continue
+                    gs_reset=allow_tg300b and raw==TG300B_SYSTEM_ON
+                    if not (standard or xg_reset or gs_reset or is_setup_packet(packet)):continue
                 if not keep_setup and (msg.type=='program_change' or (msg.type=='control_change' and msg.control in (0,32,5,6,38,7,10,65,71,72,73,74,75,76,77,78,84,91,93,94,96,97,98,99,100,101))):continue
                 events.append((tick,order,port,raw))
             order+=1

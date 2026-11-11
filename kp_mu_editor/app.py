@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBo
 from . import __version__
 from .session import Session,atomic_write,read_bounded_file
 from .schema import PROFILES,PART_BY_KEY,part_params,read_blocks,CC_PART,Param
-from .protocol import change,cc,parse,encode
+from .protocol import change,cc,parse,encode,TG300B_SYSTEM_ON
 from .catalog import Catalog
 from .engine import Engine,load_midi,write_midi
 from .widgets import button,label,GESTURES,value_style,DragSpinBox as QSpinBox
@@ -88,6 +88,13 @@ class MainWindow(QMainWindow):
     def on_sysex_sent(self,raw):
         if raw[:1]!=b'\xf0' or raw[-1:]!=b'\xf7':return
         self.last_sysex=raw.hex(' ').upper()
+        if self.session.profile.tg300b_catalog and raw==TG300B_SYSTEM_ON and self.session.mode!='TG300B':
+            self.session.mode='TG300B'
+            self.mark_changed()
+        elif (self.session.profile.tg300b_catalog and self.session.mode=='TG300B'
+              and len(raw)==9 and raw==change((0,0,0x7e),[0],device=raw[2]&15)):
+            self.session.mode='XG'
+            self.mark_changed()
         self.sysex_display.setText(self.last_sysex);self.sysex_display.setCursorPosition(0)
         self.sysex_display.setToolTip(self.last_sysex)
         self.copy_sysex_button.setEnabled(True)
@@ -106,8 +113,13 @@ class MainWindow(QMainWindow):
         if 'program' not in params:return '—'
         msb=self.session.get(params['bank_msb'],n);lsb=self.session.get(params['bank_lsb'],n) if 'bank_lsb' in params else 0
         program=self.session.get(params['program'],n)
+        drum=False
+        if self.session.profile.tg300b_catalog and self.session.mode=='TG300B':
+            drum=bool(self.session.get(params['mode'],n))
+            lsb=0
+            if drum:msb=0
         name=self.catalog.voice_name(self.session.profile,msb,lsb,program,
-             self.session.get_bytes(0x49,(0,0,0x12),1)!=b'\x00',self.session.mode)
+             self.session.get_bytes(0x49,(0,0,0x12),1)!=b'\x00',self.session.mode,drum=drum)
         return display_voice_name(name,program,msb,lsb)
 
     def status(self,text):
@@ -247,31 +259,51 @@ class MainWindow(QMainWindow):
             self.refresh_pending=True
         except ValueError as exc:self.error(str(exc))
 
-    def assign_voice(self,msb,lsb,program,index=None):
+    def assign_voice(self,msb,lsb,program,index=None,*,drum=None):
         p=self.session.profile;params={x.key:x for x in part_params(p)};n=self.selected_part if index is None else index
         if not 0<=n<p.parts or any(not isinstance(value,int) or not 0<=value<=127 for value in (msb,lsb,program)):
             self.error('音色のパートまたはバンク・プログラム番号が範囲外です。');return
         changes=[]
         setup=None
+        shared_parts=[]
+        tg300b=p.tg300b_catalog and self.session.mode=='TG300B'
         if not p.native5:
             mode=self.session.get(params['mode'],n)
-            is_kit=msb in (120,126,127) and self.session.mode in ('XG','GM','GM2')
+            if tg300b:
+                is_kit=bool(mode) if drum is None else drum
+                lsb=0
+            else:
+                is_kit=msb in (120,126,127) and self.session.mode in ('XG','GM','GM2')
             target_mode=(mode if mode else 1) if is_kit else 0
+            if tg300b and is_kit:
+                msb=0
+                # MU500 maps generic DRUM to DRUM1 in TG300B.
+                part_modes=[self.session.get(params['mode'],part) for part in range(p.parts)]
+                occupied={2 if value==1 else value for value in part_modes}
+                if mode==0:target_mode=next((value for value in range(2,p.drums+2) if value not in occupied),2)
+                elif mode==1:target_mode=2
+                shared_parts=[part for part,value in enumerate(part_modes)
+                              if part!=n and (2 if value==1 else value)==target_mode]
+                setup=target_mode-2
             if mode!=target_mode:changes.append((params['mode'],target_mode,n,None))
         tone=[(params['bank_msb'],msb,n,None)]
         if 'bank_lsb' in params:tone.append((params['bank_lsb'],lsb,n,None))
         tone.append((params['program'],program,n,None))
         known=all(self.session.get_bytes(param.model,param.address(n),param.size) is not None for param,_,_,_ in tone)
         same=not changes and all(self.session.get(param,n)==value for param,value,_,_ in tone)
-        if same and known:
+        if same and known and (not tg300b or is_kit):
             self.status('この音色はすでに選択されています。');return
-        if not p.native5:
-            if is_kit and mode>=2:
-                setup=mode-2
-                if QMessageBox.question(self,'ドラムキットの変更','キットを変更すると、共有するDrum Setupの編集が初期化されます。変更しますか？')!=QMessageBox.StandardButton.Yes:return
+        if not p.native5 and is_kit and (mode>=2 or shared_parts):
+            message='キットを変更すると、共有するDrum Setupの編集が初期化されます。変更しますか？'
+            if shared_parts:
+                message=tr('このDrum Setupを共有するパートのキットも変更され、ノート別設定が初期化されます。変更しますか？')
+                message+='\n'+', '.join(self.part_name(part) for part in shared_parts)
+            if QMessageBox.question(self,'ドラムキットの変更',message)!=QMessageBox.StandardButton.Yes:return
+            if setup is None:setup=mode-2
         # Bank changes are completed by PROGRAM NUMBER, even when its value
         # equals the previous voice. Keep all fields for Undo and SMF export too.
         self.edit_many(changes+tone,'音色変更',force=True)
+        for part in shared_parts:self.session.set(params['program'],program,part)
         if setup is not None:
             self.session.invalidate_drums(setup)
             if self.can_send():self.read_addresses([x for x in read_blocks(p) if x[1][0]==0x30+setup],'ドラム再取得')
@@ -339,7 +371,7 @@ class MainWindow(QMainWindow):
         old=self.session.mode
         if self.engine.connected and QMessageBox.question(self,'動作モードの変更','モード切替は本体の設定を初期化する場合があります。現在のセットを保存してから切り替えてください。実行しますか？')!=QMessageBox.StandardButton.Yes:
             self.mode.blockSignals(True);self.mode.setCurrentText(old);self.mode.blockSignals(False);return
-        resets={'XG':'F0 43 10 4C 00 00 7E 00 F7','GM':'F0 7E 7F 09 01 F7','GM2':'F0 7E 7F 09 03 F7','TG300B':'F0 41 10 42 12 40 00 7F 00 41 F7','GS':'F0 41 10 42 12 40 00 7F 00 41 F7'}
+        resets={'XG':'F0 43 10 4C 00 00 7E 00 F7','GM':'F0 7E 7F 09 01 F7','GM2':'F0 7E 7F 09 03 F7','TG300B':TG300B_SYSTEM_ON.hex(),'GS':TG300B_SYSTEM_ON.hex()}
         self.session.checkpoint('モード変更');self.session.mode=mode;self.mark_changed()
         if mode in resets and self.engine.connected:self.send_messages([(0,bytes.fromhex(resets[mode]))],'モード切替');self.read_all()
         elif mode=='Performance':self.status('本体側をPerformanceモードに切り替えてください。機種固有画面から番号を呼び出せます。')
@@ -452,7 +484,9 @@ class MainWindow(QMainWindow):
     def assign_part_mode(self,index,value):
         params={p.key:p for p in part_params(self.session.profile)}
         if 'mode' not in params:return
-        changes=[(params['mode'],value,index,None),(params['bank_msb'],127 if value else 0,index,None)]
+        tg300b=self.session.profile.tg300b_catalog and self.session.mode=='TG300B'
+        if tg300b and value==1:value=2
+        changes=[(params['mode'],value,index,None),(params['bank_msb'],127 if value and not tg300b else 0,index,None)]
         if 'bank_lsb' in params:changes.append((params['bank_lsb'],0,index,None))
         self.edit_many(changes,'パート / ドラム切替')
         if value>=2:
@@ -580,7 +614,10 @@ class MainWindow(QMainWindow):
             self.status(f'{text}：{details.get("count",0):,}ブロック取得'+suffix)
             self.log('READ SUMMARY '+json.dumps(details,ensure_ascii=False))
             if missing:self.log('NO RESPONSE '+json.dumps(missing))
-        elif text=='再生完了' and self.loop.isChecked():self.play()
+        elif text=='再生完了':
+            if self.loop.isChecked():self.play()
+            elif self.session.profile.tg300b_catalog and self.session.mode=='TG300B' and self.keep_setup.isChecked():
+                self.read_addresses([(0x4c,(8,part,0)) for part in range(self.session.profile.parts)],'パート取得')
 
     def open_midi(self):
         path,_=QFileDialog.getOpenFileName(self,'MIDIファイルを開く',str(self.data_dir),'MIDI (*.mid *.midi)')
@@ -593,7 +630,7 @@ class MainWindow(QMainWindow):
         if not self.engine.connected:self.status('再生にはMIDI接続が必要です。');return
         started=time.perf_counter()
         try:
-            schedule=load_midi(self.midi_file,self.keep_setup.isChecked())
+            schedule=load_midi(self.midi_file,self.keep_setup.isChecked(),allow_tg300b=self.session.profile.tg300b_catalog)
             self.diagnostics.record('midi_file_loaded',filename=Path(self.midi_file).name,size=Path(self.midi_file).stat().st_size,
                                     elapsed_ms=(time.perf_counter()-started)*1000,events=len(schedule),keep_setup=self.keep_setup.isChecked())
             needed={e[2] for e in schedule}

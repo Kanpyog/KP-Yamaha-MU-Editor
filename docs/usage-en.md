@@ -11,6 +11,7 @@ Use **Read from device** to get the current settings. Unread values are shown us
 ## Edit and audition
 
 - Select a part in the mixer and double-click a voice in the browser. Search by name or an identifier such as `99-0-42`. Program numbers on screen are 1–128.
+- On the MU500 in TG300B mode, the browser also offers variation voices and drum kits. Parts that share a Drum Setup use the same kit.
 - Drag numeric fields up or down, double-click them, or type a value. Bold green values differ from their initial settings.
 - Edit model-specific settings on the Part, Drums and Effects pages. Parts that use the same Drum Setup share per-note changes.
 - Use the audition keyboard and its octave control to reach lower drum notes. **ALL NOTES OFF** releases sounding notes.

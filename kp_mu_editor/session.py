@@ -77,6 +77,10 @@ class Session:
         return bytes(memory[k] for k in keys) if all(k in memory for k in keys) else None
 
     def default_value(self,param,index=0,drum_set=None):
+        if (self.profile.tg300b_catalog and self.mode=='TG300B' and drum_set is None
+                and param.model==0x4c and param.high==8):
+            if param.key=='mode':return 2 if index%16==9 else 0
+            if param.key in ('bank_msb','bank_lsb'):return 0
         address=param.address(index) if drum_set is None else (0x30+drum_set,index,param.low)
         raw=self.initial_bytes(param.model,address,param.size)
         if raw is not None:

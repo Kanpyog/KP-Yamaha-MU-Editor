@@ -7,7 +7,8 @@ from PySide6.QtWidgets import QApplication,QMessageBox
 from kp_mu_editor.app import MainWindow
 from kp_mu_editor.catalog import Catalog
 from kp_mu_editor.engine import write_midi,load_midi
-from kp_mu_editor.protocol import parse,change
+from kp_mu_editor.protocol import parse,change,TG300B_SYSTEM_ON
+from kp_mu_editor.voice_catalog import voice_favorite_key
 from kp_mu_editor.schema import PROFILES,PART_BY_KEY,DRUM,part_params
 from kp_mu_editor.session import Session
 
@@ -45,6 +46,23 @@ class VoiceCatalogTests(unittest.TestCase):
         self.assertNotEqual(self.catalog.voice_name(PROFILES['MU500'],0,0,0,True),self.catalog.voice_name(PROFILES['MU500'],0,0,0,False))
         self.assertTrue(all(v['msb']==v['lsb']==0 for v in self.catalog.voices(PROFILES['MU50'],mode='GM')))
         self.assertTrue(all(v['msb']==121 and v['category'] for v in self.catalog.voices(PROFILES['MU500'],mode='GM2')))
+
+
+    def test_mu500_tg300b_uses_its_own_voices_and_drum_kits(self):
+        profile=PROFILES['MU500']
+        variants=self.catalog.voices(profile,True,'TG300B')
+        self.assertEqual(variants,self.catalog.voices(profile,False,'TG300B'))
+        self.assertEqual(len(variants),664)
+        self.assertTrue(all(v['lsb']==0 and v['kind']=='normal' for v in variants))
+        self.assertEqual(len({(v['msb'],v['program']) for v in variants}),664)
+        self.assertEqual(self.catalog.voice_name(profile,1,0,2,mode='TG300B'),'Layer CP1')
+        self.assertEqual(self.catalog.voice_name(profile,126,0,0,mode='TG300B'),'A-Piano1')
+        kits=self.catalog.kits(profile,mode='TG300B')
+        self.assertEqual([v['program']+1 for v in kits],[1,9,17,25,26,33,41,49,57,128])
+        self.assertEqual(self.catalog.voice_name(profile,0,0,0,mode='TG300B'),'GrandPno')
+        self.assertEqual(self.catalog.voice_name(profile,0,0,0,mode='TG300B',drum=True),'Standard Kit')
+        self.assertNotEqual(voice_favorite_key(variants[0]),voice_favorite_key(kits[0]))
+        self.assertFalse(self.catalog.kits(PROFILES['MU1000'],mode='TG300B'))
 
 
 class VoiceSelectionTests(unittest.TestCase):
@@ -140,6 +158,53 @@ class VoiceSelectionTests(unittest.TestCase):
         visible=[v for i,v in enumerate(page.rows) if not page.grid.isRowHidden(i)]
         self.assertTrue(visible);self.assertTrue(all(v['category']=='SFX' for v in visible))
         self.assertTrue(any(v['msb']==64 for v in visible));self.assertTrue(any(v['msb']==48 for v in visible))
+
+    def test_mu500_tg300b_browser_assigns_normal_and_drum_to_same_part(self):
+        w=self.w;w.session.mode='TG300B';w.navigate(1);page=w.pages[1]
+        self.assertEqual(len(page.rows),674)
+        for name,kind,bank,program,part_mode in (
+            ('Layer CP1','normal',1,2,0),('Electro Kit','drum_kit',0,24,3),
+            ('A-Piano1','normal',126,0,0),
+        ):
+            row=next(i for i,v in enumerate(page.rows) if v['name']==name and v['kind']==kind)
+            page.grid.setCurrentCell(row,4)
+            page.grid.cellDoubleClicked.emit(row,4)
+            self.assertEqual(w.session.get(PART_BY_KEY['mode']),part_mode)
+            self.assertEqual(w.voice_name(0),f'{program+1}-{bank}-0 {name}')
+            self.assertEqual([(p.address[2],p.data[0]) for p in self.packets()[-3:]],
+                             [(1,bank),(2,0),(3,program)])
+            w.engine.sent.clear()
+
+    def test_mu500_tg300b_shared_kit_change_confirms_and_updates_other_parts(self):
+        w=self.w;w.session.mode='TG300B';w.selected_part=9
+        with patch.object(QMessageBox,'question',return_value=QMessageBox.StandardButton.No) as confirm:
+            w.assign_voice(0,0,24,drum=True)
+        self.assertEqual(w.engine.sent,[])
+        self.assertIn('B10, C10, D10',confirm.call_args.args[2])
+        with patch.object(QMessageBox,'question',return_value=QMessageBox.StandardButton.Yes):
+            w.assign_voice(0,0,24,drum=True)
+        for part in (9,25,41,57):
+            self.assertEqual(w.session.get(PART_BY_KEY['program'],part),24)
+        self.assertEqual([p.address for p in self.packets() if p.address[2]==3],[(8,9,3)])
+
+    def test_mu500_playback_respects_song_settings_for_gs_reset(self):
+        import mido
+        path=Path(self.temp.name)/'gs.mid'
+        midi=mido.MidiFile(type=0)
+        midi.tracks.append(mido.MidiTrack([mido.Message('sysex',data=TG300B_SYSTEM_ON[1:-1])]))
+        midi.save(path)
+        self.assertFalse(load_midi(path))
+        self.assertFalse(load_midi(path,False,allow_tg300b=True))
+        self.assertEqual([event[3] for event in load_midi(path,allow_tg300b=True)],[TG300B_SYSTEM_ON])
+        self.w.on_sysex_sent(TG300B_SYSTEM_ON)
+        self.assertEqual(self.w.session.mode,'TG300B')
+        self.assertEqual(self.w.engine.sent,[])
+        self.w.keep_setup.setChecked(True)
+        self.w.on_finished('再生完了',{})
+        kind,(blocks,label)=self.w.engine.commands[-1]
+        self.assertEqual((kind,len(blocks),blocks[9]),('read',64,(0x4c,(8,9,0))))
+        self.w.on_sysex_sent(change((0,0,0x7e),[0]))
+        self.assertEqual(self.w.session.mode,'XG')
 
     def test_mu5_keeps_native_protocol_and_has_no_lsb_message(self):
         w=self.w;w.session=Session('MU5');w.detected_name='MU5';w.assign_voice(0,0,4)

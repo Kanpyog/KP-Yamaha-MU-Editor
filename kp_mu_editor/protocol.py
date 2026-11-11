@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+TG300B_SYSTEM_ON = bytes.fromhex('F0 41 10 42 12 40 00 7F 00 41 F7')
+
+
 def _seven(values):
     values = tuple(values)
     if any(not isinstance(x, int) or not 0 <= x <= 127 for x in values):

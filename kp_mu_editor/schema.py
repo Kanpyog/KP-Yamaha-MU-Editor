@@ -18,6 +18,7 @@ class Profile:
     ex: bool = False
     native5: bool = False
     unsupported: bool = False
+    tg300b_catalog: bool = False
 
     @property
     def modes(self):
@@ -47,7 +48,7 @@ family('MU100',32,64,2,4,4,eq=True,hpf=True,ad=True,plg=1,performance=True)
 family('MU100B|MU100Bs',32,64,2,4,4,eq=True,hpf=True,ad=True,plg=1)
 family('MU100R',32,64,2,4,4,eq=True,hpf=True,ad=True,plg=2,performance=True)
 family('MU128|MU128 V2',64,128,2,4,4,eq=True,hpf=True,ad=True,plg=3,performance=True)
-family('MU500',64,64,2,4,5,eq=True,hpf=True)
+family('MU500',64,64,2,4,5,eq=True,hpf=True,tg300b_catalog=True)
 family('MU1000|MU2000',64,128,4,4,5,eq=True,hpf=True,ad=True,plg=3,performance=True,unsupported=True)
 family('MU1000 EX|MU1000 EX R1|MU2000 EX|MU2000 EX R1',64,128,4,4,5,eq=True,hpf=True,ad=True,plg=3,performance=True,ex=True,unsupported=True)
 

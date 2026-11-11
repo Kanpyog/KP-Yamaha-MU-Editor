@@ -15,11 +15,14 @@ class Catalog:
         if cachekey in self._voices:return self._voices[cachekey]
         result=[];keys=set()
         rows=self.data['voices']
+        tg300b=mode=='TG300B' and profile.tg300b_catalog
         # Native capital voices override basic capital names on the native map.
         native_keys={(x['msb'],x['lsb'],x['program']) for x in rows if x['map']=='native'}
         for row in rows:
             rowmode=row.get('mode','XG')
-            if mode=='GM2':
+            if tg300b:
+                if rowmode!='TG300B':continue
+            elif mode=='GM2':
                 if rowmode!='GM2':continue
             elif mode in ('TG300B','GS'):
                 if rowmode!='XG' or row['msb'] or row['lsb'] or row['map']=='native':continue
@@ -30,7 +33,7 @@ class Catalog:
             if profile.native5 and (row['msb'] or row['lsb'] or row['map']=='native'):continue
             key=(row['msb'],row['lsb'],row['program'])
             if profile.generation<4 and row['map']=='native':continue
-            if profile.generation>=4:
+            if not tg300b and profile.generation>=4:
                 if not native and row['map']=='native':continue
                 if native and key in native_keys and row['map']!='native':continue
             if key in keys:continue
@@ -40,6 +43,7 @@ class Catalog:
         return result
 
     def kits(self,profile,native=True,mode='XG'):
+        if mode=='TG300B' and not profile.tg300b_catalog:return []
         cachekey=(profile.name,native,mode)
         if cachekey in self._kits:return self._kits[cachekey]
         result=[];seen=set()
@@ -53,12 +57,20 @@ class Catalog:
         self._kits[cachekey]=result
         return result
 
-    def voice_name(self,profile,msb,lsb,program,native=True,mode='XG'):
-        key=(profile.name,native,mode)
+    def voice_name(self,profile,msb,lsb,program,native=True,mode='XG',*,drum=False):
+        tg300b=mode=='TG300B' and profile.tg300b_catalog
+        key=(profile.name,native,mode,tg300b and drum)
         if key not in self._names:
-            self._names[key]={(v['msb'],v['lsb'],v['program']):v['name'] for v in self.voices(profile,native,mode)+self.kits(profile,native,mode)}
+            if tg300b:
+                rows=self.kits(profile,native,mode) if drum else self.voices(profile,native,mode)
+            else:
+                rows=self.voices(profile,native,mode)+self.kits(profile,native,mode)
+            self._names[key]={(v['msb'],v['lsb'],v['program']):v['name'] for v in rows}
+        if tg300b:
+            lsb=0
+            if drum:msb=0
         if (msb,lsb,program) in self._names[key]:return self._names[key][msb,lsb,program]
-        if msb in (126,127):return f'Drum Kit {program+1}'
+        if (tg300b and drum) or (not tg300b and msb in (126,127)):return f'Drum Kit {program+1}'
         return f'Voice {msb}:{lsb}:{program+1}'
 
     def readback_offsets(self,packet,type_pair):

@@ -15,7 +15,7 @@ from .catalog import CATEGORIES
 from .engine import load_midi,write_midi
 from .i18n import (QLabel,QLineEdit,QComboBox,QCheckBox,QTableWidgetItem,QFormLayout,
  QGroupBox,QTabWidget,QInputDialog,QMessageBox,QFileDialog)
-from .voice_catalog import display_voice_name
+from .voice_catalog import display_voice_name,voice_favorite_key
 from .session import read_bounded_file, MAX_SYSEX_BYTES
 
 CC_DEFAULTS={7:100,10:64,11:127,71:64,72:64,73:64,74:64,75:64,76:64,77:64,78:64,91:40}
@@ -53,13 +53,20 @@ class Voices(QWidget):
     def refresh(self):
         s=self.app.session;native=s.get_bytes(0x49,(0,0,0x12),1)!=b'\x00';signature=(s.profile.name,native,s.mode)
         if self.signature==signature:self.filter();return
-        self.signature=signature;self.rows=list(self.app.catalog.voices(s.profile,native,s.mode))
+        self.signature=signature
+        cm=self.category.findText('C/M')
+        if s.profile.tg300b_catalog and s.mode=='TG300B':
+            if cm<0:self.category.addItem('C/M')
+        elif cm>=0:
+            if self.category.currentIndex()==cm:self.category.setCurrentIndex(0)
+            self.category.removeItem(cm)
+        self.rows=list(self.app.catalog.voices(s.profile,native,s.mode))
         kits=self.app.catalog.kits(s.profile,native,s.mode)
         for kit in kits:
             if kit.get('generation',1)<=s.profile.generation:self.rows.append(dict(kit,category='Drum / SFX Kit'))
         self.grid.setRowCount(len(self.rows));self.grid.blockSignals(True)
         for r,v in enumerate(self.rows):
-            key=f"{v['msb']}:{v['lsb']}:{v['program']}"
+            key=voice_favorite_key(v)
             cat=v['category']
             values=['★' if key in self.app.favorites else '☆',v['program']+1,v['msb'],v['lsb'],display_voice_name(v['name'],v['program'],v['msb'],v['lsb']),cat,v.get('elements','—')]
             for c,val in enumerate(values):self.grid.setItem(r,c,item(val))
@@ -68,14 +75,14 @@ class Voices(QWidget):
     def filter(self,*_):
         query=self.search.text().casefold();category=self.category.sourceText()
         for r,v in enumerate(self.rows):
-            key=f"{v['msb']}:{v['lsb']}:{v['program']}";cat=v['category']
+            key=voice_favorite_key(v);cat=v['category']
             searchkey=f"{v['msb']}:{v['lsb']}:{v['program']+1}"
             hidden=(query not in (display_voice_name(v['name'],v['program'],v['msb'],v['lsb'])+' '+searchkey).casefold() or (self.category.currentIndex()>0 and cat!=category)
                     or (self.favs.isChecked() and key not in self.app.favorites))
             self.grid.setRowHidden(r,hidden)
 
     def clicked(self,r,c):
-        v=self.rows[r];key=f"{v['msb']}:{v['lsb']}:{v['program']}"
+        v=self.rows[r];key=voice_favorite_key(v)
         self.details.setText(f"{display_voice_name(v['name'],v['program'],v['msb'],v['lsb'])}   ·   {v.get('voice_family','')} / {v.get('bank_description','')}   ·   {v.get('source','Yamaha voice list')}")
         if c==0:
             if key in self.app.favorites:self.app.favorites.remove(key)
@@ -85,7 +92,9 @@ class Voices(QWidget):
     def apply(self):
         row=self.grid.currentRow()
         if row>=0 and not self.grid.isRowHidden(row):
-            v=self.rows[row];self.app.assign_voice(v['msb'],v['lsb'],v['program'])
+            v=self.rows[row];tone=(v['msb'],v['lsb'],v['program'])
+            if v.get('mode')=='TG300B':self.app.assign_voice(*tone,drum=v['kind']=='drum_kit')
+            else:self.app.assign_voice(*tone)
         else:self.app.status('一覧に表示されている音色を選択してください。')
 
     def direct(self):

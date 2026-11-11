@@ -16,7 +16,13 @@ EXCLUSIVE_BANKS={
 def normalize_voice(row):
     row=dict(row)
     msb,lsb,program=row['msb'],row['lsb'],row['program']
-    if msb in (120,126,127):
+    if row.get('mode') == 'TG300B':
+        if row.get('kind') == 'drum_kit':
+            row.update(category='Drum / SFX Kit',voice_family='Drum Kit',bank_description='TG300B')
+        else:
+            category = 'C/M' if msb in (126,127) else GM_CATEGORIES[program//8]
+            row.update(kind='normal',category=category,voice_family='TG300B',bank_description='TG300B')
+    elif msb in (120,126,127):
         row['kind']='sfx_kit' if msb==126 else 'drum_kit'
         row['category']='Drum / SFX Kit'
         row['voice_family']='SFX Kit' if msb==126 else 'Drum Kit'
@@ -36,6 +42,13 @@ def normalize_voice(row):
     else:
         row.update(kind='normal',category=row.get('category','Other'),voice_family=row.get('voice_family','Other'),bank_description=row.get('bank_description',''))
     return row
+def voice_favorite_key(row):
+    key = f"{row['msb']}:{row['lsb']}:{row['program']}"
+    if row.get('mode') == 'TG300B':
+        return f"TG300B:{row['kind']}:{key}"
+    return key
+
+
 def display_voice_name(name,program,msb,lsb):
     """Use one-based program numbers in every user-facing voice label."""
     return f'{program+1}-{msb}-{lsb} {name.replace(" #","#")}'
