@@ -27,8 +27,12 @@ Opening a set loads it on the PC. Choose **Send to device** to apply it. A bulk 
 
 Select an SMF Format 0 or 1 file and play it through the connected MU. **Use song voices/settings** also sends supported bank, program and setup messages. A song with a GM, GM2 or XG reset may change device settings.
 
-## Display and diagnostics
+## Display and troubleshooting
 
-Switch languages under **Edit → Preferences → Language**. The top bar switches between light and dark modes.
+On first launch, the menus are in Japanese. To switch to English, open **編集 → 環境設定 → Language** and select **英語（Eng）**. The top bar switches between light and dark modes.
 
-If a device read is slow or incomplete, check the model and port assignments. Open **MIDI Log** from the top bar. For a detailed recording, select Debug mode on the **Diagnostics** tab in Preferences. [Diagnostic data and sharing](security.md)
+If a device read is slow or the connection drops, check the model and MIDI port assignments. Open **MIDI Log** from the top bar to check MIDI traffic.
+
+### Submit a log
+
+If you are asked for a log to help troubleshoot a problem, choose **Edit → Preferences → Diagnostics → Export diagnostic logs**. Share the ZIP and the time the problem occurred. [Stored data and sharing](security-en.md)

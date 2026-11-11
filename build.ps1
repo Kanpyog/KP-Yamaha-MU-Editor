@@ -31,6 +31,9 @@ foreach ($taskName in @('icuuc.dll','icudt78.dll')) {
 }
 Copy-Item -LiteralPath "$taskRoot\README.md", "$taskRoot\README_EN.md", "$taskRoot\THIRD_PARTY_NOTICES.md", "$taskRoot\LICENSE" -Destination $taskFresh -Force
 Copy-Item -LiteralPath "$taskRoot\docs", $taskLicenses -Destination $taskFresh -Recurse -Force
+$taskImages = Join-Path $taskFresh 'images'
+New-Item -ItemType Directory -Path $taskImages -Force | Out-Null
+Copy-Item -LiteralPath "$taskRoot\images\kp_yamaha_mu_editor.jpg" -Destination $taskImages -Force
 & $taskPython "$taskRoot\work\package_release.py" --app-dir $taskFresh
 if ($LASTEXITCODE -ne 0) { throw 'Release packaging failed' }
 $taskOutput = Join-Path $taskRoot 'outputs'
