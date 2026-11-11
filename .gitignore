@@ -1,0 +1,49 @@
+# Python caches and test / analysis output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+
+# Local Python environments
+.venv/
+venv/
+env/
+
+# Personal settings, MIDI logs, backups and saved sets
+/userdata/
+
+# Built applications and release archives
+/outputs/
+/build/
+/dist/
+
+# Keep the work directory's reproducible build/catalog helpers only.
+# Local environments, source snapshots, hardware captures and QA stay local.
+/work/*
+!/work/collect_licenses.py
+!/work/package_release.py
+!/work/make_catalog.py
+!/work/voice_table.py
+
+# Local hardware exercises and manual QA utilities
+/tests/gui_hardware.py
+/tests/hardware_verify.py
+/tests/gui_verify.py
+/tests/revision_render.py
+
+# Machine-specific editor and OS files
+.vs/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local environment variables
+.env
+.env.*
+!.env.example
