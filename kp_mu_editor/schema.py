@@ -1,5 +1,6 @@
 """Device capabilities and independently transcribed Yamaha parameter addresses."""
 from dataclasses import dataclass, replace
+from enum import Enum
 
 
 @dataclass(frozen=True)
@@ -222,6 +223,68 @@ def read_blocks(profile, include_drums=True):
         result += [(0x4c,(0x30+n,note,x)) for n in range(profile.drums)
                    for note in range(13,92 if profile.generation>=3 else 85) for x in lows]
     return result
+
+
+class SetupScope(Enum):
+    ALL = 'all'
+    EFFECTS = 'effects'
+    DRUM_MAP = 'drum_map'
+
+
+_EFFECT_SEND_OFFSETS = frozenset(PART_BY_KEY[key].low for key in ('dry','chorus','reverb','variation'))
+_PART_EQ_OFFSETS = frozenset(param.low for param in PART if param.group=='EQ')
+
+
+def _part_effect_offsets(profile):
+    return _EFFECT_SEND_OFFSETS | _PART_EQ_OFFSETS if profile.part_eq else _EFFECT_SEND_OFFSETS
+
+
+def effect_part_addresses(profile):
+    if profile.native5:
+        return []
+    part_offsets = sorted(_part_effect_offsets(profile))
+    addresses = [(8,part,low) for part in range(profile.parts) for low in part_offsets]
+    if profile.ad:
+        addresses += [(0x10,part,low) for part in range(2) for low in sorted(_EFFECT_SEND_OFFSETS)]
+    return addresses
+
+
+def in_setup_scope(profile, scope, model, address, size):
+    if scope is SetupScope.ALL:
+        return True
+    if profile.native5 or model != 0x4c:
+        return False
+    high, middle, low = address
+    if scope is SetupScope.DRUM_MAP:
+        note_end = 92 if profile.generation >= 3 else 85
+        return 0x30 <= high < 0x30+profile.drums and 13 <= middle < note_end
+    if scope is SetupScope.EFFECTS:
+        if high == 2:
+            return middle == 1 or (middle == 0x40 and profile.eq)
+        if high == 3:
+            return 0 <= middle < profile.insertions
+        if high == 8 and 0 <= middle < profile.parts:
+            offsets = _part_effect_offsets(profile)
+        elif high == 0x10 and profile.ad and 0 <= middle < 2:
+            offsets = _EFFECT_SEND_OFFSETS
+        else:
+            return False
+        return all(offset in offsets for offset in range(low,low+size))
+    raise ValueError('Invalid setup scope')
+
+
+def setup_read_blocks(profile, scope):
+    if not isinstance(scope, SetupScope):
+        raise ValueError('Invalid setup scope')
+    blocks = read_blocks(profile, include_drums=scope is not SetupScope.EFFECTS)
+    if scope is SetupScope.ALL:
+        return blocks
+    selected = [block for block in blocks if in_setup_scope(profile,scope,block[0],block[1],1)]
+    if scope is SetupScope.EFFECTS:
+        # The full part dump starts with the voice bank and program. Request
+        # the effect sends and EQ fields individually.
+        selected += [(0x4c,address,True) for address in effect_part_addresses(profile)]
+    return selected
 
 
 CC_CONTROLS = [(1,'Modulation'),(5,'Portamento Time'),(7,'Volume'),(10,'Pan'),(11,'Expression'),

@@ -214,6 +214,10 @@ class QInputDialog(W.QInputDialog):
     @staticmethod
     def getText(parent,title,label,*args,**kwargs):return W.QInputDialog.getText(parent,tr(title),tr(label),*args,**kwargs)
 
+    @staticmethod
+    def getItem(parent,title,label,items,*args,**kwargs):
+        return W.QInputDialog.getItem(parent,tr(title),tr(label),[tr(item) for item in items],*args,**kwargs)
+
 
 class QFileDialog(W.QFileDialog):
     @staticmethod

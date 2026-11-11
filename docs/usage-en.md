@@ -20,6 +20,8 @@ Use **Read from device** to get the current settings. Unread values are shown us
 
 Device reads are backed up under `userdata/backups/`. Use **Save** for JSON sets or SMF Format 1. The Library handles SysEx import and export.
 
+When exporting SMF, reading from the device, or sending to it, choose all settings, effects only, or drum map only. Effect settings include routing, sends, and EQ. Drum maps contain per-note settings for each Drum Setup. Partial exports and transfers preserve voice and kit selections. In a sequencer, place the drum map SysEx after the Program Change that selects the kit.
+
 Opening a set loads it on the PC. Choose **Send to device** to apply it. A bulk send first backs up the current device state, then verifies bulk blocks by reading them back.
 
 **XG RESET** confirms the action, backs up the settings currently held on the PC, resets the unit to its XG initial state and reads it again. Read and save any changes made on the hardware before resetting.

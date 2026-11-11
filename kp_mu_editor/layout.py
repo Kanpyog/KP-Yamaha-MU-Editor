@@ -46,7 +46,7 @@ def build_window(a):
     a.part=QComboBox();a.part.setStyleSheet('font-size:26px;font-weight:700;');a.part.setMinimumWidth(115);a.part.currentIndexChanged.connect(a.select_part);sl.addWidget(a.part)
     a.part_voice=label('','font-size:25px;font-weight:700;color:@title@;');a.part_voice.setWordWrap(False);a.part_voice.setMinimumWidth(0);a.part_voice.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred);sl.addWidget(a.part_voice,1)
     a.connect_button=button('接続',a.connect_dialog);sl.addWidget(a.connect_button)
-    sl.addWidget(button('本体から取得',a.read_all));sl.addWidget(button('本体へ送信',a.send_all,True));sl.addWidget(button('保存',a.save_session))
+    sl.addWidget(button('本体から取得',a.read_from_device));sl.addWidget(button('本体へ送信',a.send_to_device,True));sl.addWidget(button('保存',a.save_session))
     a.panic_button=button('ALL NOTES OFF',a.all_notes_off)
     style_widget(a.panic_button,'QPushButton {color:@danger@;border:1px solid @danger_border@;background:@danger_bg@;font-weight:700;padding:10px;} QPushButton:hover {border-color:@danger@;}')
     a.panic_button.setToolTip('全出力・全チャンネルへAll Notes Offを送信し、保持ペダルと発音を解除します。再生も停止します。')

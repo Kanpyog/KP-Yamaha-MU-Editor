@@ -7,7 +7,7 @@ from tempfile import NamedTemporaryFile
 from functools import lru_cache
 from datetime import datetime
 from .protocol import parse, change, bulk, encode, decode, split_sysex, is_setup_write, is_setup_packet
-from .schema import PROFILES, part_params, read_blocks
+from .schema import PROFILES, SetupScope, effect_part_addresses, in_setup_scope, part_params, read_blocks
 from . import __version__
 
 FORMAT = 'KP_YAMAHA_MUeditor/session/1'
@@ -170,11 +170,18 @@ class Session:
             for key,size in list(mapping.items()):
                 if key[:3]==(0x4c,h,m) and any(n in lows for n in range(key[3],key[3]+size)):mapping.pop(key)
 
-    def export_messages(self):
+    def export_messages(self,scope=SetupScope.ALL):
         """Part mode/program blocks precede drum data, which PC can reset."""
         allowed_models=(0x44,) if self.profile.native5 else (0x4c,0x49)
+        if not isinstance(scope,SetupScope):
+            raise ValueError('Invalid setup scope')
         keys=sorted(self.memory)
         covered=set(); messages=[]
+
+        def included(model, address, size):
+            return (model in allowed_models and is_setup_write(model,address,size)
+                    and in_setup_scope(self.profile,scope,model,address,size))
+
         def priority(item):
             model,h,m,l=item
             # A tone's mode must be established before its bank and program.
@@ -182,7 +189,7 @@ class Session:
             return (4 if h>=0x30 and model==0x4c else (0 if h in (0,2,3) else 2),model,h,m,low)
         for model,h,m,l in sorted(self.blocks,key=priority):
             size=self.blocks[(model,h,m,l)]
-            if model not in allowed_models or not is_setup_write(model,(h,m,l),size):continue
+            if not included(model,(h,m,l),size):continue
             raw=self.get_bytes(model,(h,m,l),size)
             if raw is None:continue
             messages.append(bulk((h,m,l),raw,model=model))
@@ -190,13 +197,15 @@ class Session:
         # Preserving field boundaries is important for nibble/14-bit parameters.
         specs=[]
         specs += [(key[0],key[1:],size) for key,size in self.fields.items()]
+        if scope is SetupScope.EFFECTS:
+            specs += [(0x4c,address,1) for address in effect_part_addresses(self.profile)]
         for n in range(self.profile.parts):
             specs += [(x.model,x.address(n),x.size) for x in part_params(self.profile)]
         from .schema import DRUM
         specs += [(0x4c,(0x30+s,n,x.low),x.size) for s in range(self.profile.drums)
                   for n in range(13,92) for x in DRUM if x.allowed(self.profile)]
         for model,addr,size in sorted(specs,key=lambda x:priority((x[0],*x[1]))):
-            if model not in allowed_models or not is_setup_write(model,addr,size):continue
+            if not included(model,addr,size):continue
             fieldkeys=[(model,*addr[:2],addr[2]+i) for i in range(size)]
             if all(k in covered for k in fieldkeys):continue
             raw=self.get_bytes(model,addr,size)
@@ -207,7 +216,7 @@ class Session:
             if key in covered:continue
             model,h,m,l=key
             if model not in allowed_models or (model==0x4c and h not in (0,2,3)):continue
-            if not is_setup_write(model,(h,m,l),1):continue
+            if not included(model,(h,m,l),1):continue
             messages.append(change((h,m,l),[self.memory[key]],model=model))
         return messages
 

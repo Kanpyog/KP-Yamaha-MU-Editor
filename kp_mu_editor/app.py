@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBo
  QFileDialog,QDialog,QDialogButtonBox,QFormLayout,QGroupBox,QScrollArea,QLineEdit,QPushButton)
 from . import __version__
 from .session import Session,atomic_write,read_bounded_file
-from .schema import PROFILES,PART_BY_KEY,part_params,read_blocks,CC_PART,Param
+from .schema import PROFILES,PART_BY_KEY,part_params,read_blocks,setup_read_blocks,SetupScope,CC_PART,Param
 from .protocol import change,cc,parse,encode,TG300B_SYSTEM_ON
 from .catalog import Catalog
 from .engine import Engine,load_midi,write_midi
@@ -19,7 +19,7 @@ from .winmm import ports
 from .dependencies import midi_library
 from .diagnostics import Diagnostics
 from .i18n import (tr,set_language,QAction,QLabel,QComboBox,QListWidget,QCheckBox,
- QGroupBox,QLineEdit,QPushButton,QDialog,QFormLayout,QMessageBox,QFileDialog)
+ QGroupBox,QLineEdit,QPushButton,QDialog,QFormLayout,QMessageBox,QInputDialog,QFileDialog)
 from .voice_catalog import display_voice_name
 
 from .theme import STYLE,configure_application,style_widget
@@ -559,18 +559,40 @@ class MainWindow(QMainWindow):
         if self.engine.playing:self.engine.stop()
         self.engine.submit('read',(addresses,label_text));self.status(label_text+'中…')
 
+    def choose_setup_scope(self,title,prompt):
+        labels={
+            SetupScope.ALL:'すべて',
+            SetupScope.EFFECTS:'エフェクト系のみ',
+            SetupScope.DRUM_MAP:'ドラムマップデータのみ',
+        }
+        choices={tr(label):scope for scope,label in labels.items() if setup_read_blocks(self.session.profile,scope)}
+        choice,accepted=QInputDialog.getItem(self,title,prompt,list(choices),0,False)
+        return choices.get(choice) if accepted else None
+
+    def read_from_device(self):
+        if not self.engine.connected:
+            self.status('本体から取得するにはMIDI接続が必要です。');return
+        scope=self.choose_setup_scope('本体から取得','取得する設定の範囲を選んでください。')
+        if scope is not None:
+            labels={SetupScope.ALL:'全設定取得',SetupScope.EFFECTS:'エフェクト設定取得',
+                    SetupScope.DRUM_MAP:'ドラムマップ取得'}
+            self.read_addresses(setup_read_blocks(self.session.profile,scope),labels[scope])
+
     def read_all(self):self.read_addresses(read_blocks(self.session.profile),'全設定取得')
     def read_part(self):
         n=self.selected_part
         if self.session.profile.native5:n=next(p for p in part_params(self.session.profile) if p.key=='receive').address(n)[1]
         self.read_addresses([x for x in read_blocks(self.session.profile,False) if x[1][1]==n and x[1][0] in ((2,) if self.session.profile.native5 else (8,0x0a))],'パート取得')
 
-    def send_all(self):
+    def send_to_device(self):
         if not self.engine.connected:self.status('本体へ送信するにはMIDI接続が必要です。');return
         if not self.device_matches():self.error('検出した本体と選択機種が異なります。機種を確認してください。');return
         if not self.session.memory:self.status('送信する設定がありません。');return
-        if QMessageBox.question(self,'本体へ設定を送信','現在のセットを本体へ送信します。音色・ドラム・エフェクトが変更されます。実行しますか？')!=QMessageBox.StandardButton.Yes:return
-        self.engine.submit('send_set',([(0,x) for x in self.session.export_messages()],read_blocks(self.session.profile)))
+        scope=self.choose_setup_scope('本体へ設定を送信','送信する設定の範囲を選んでください。選んだ範囲の本体設定が変更されます。')
+        if scope is None:return
+        messages=self.session.export_messages(scope)
+        if not messages:self.status('選択した範囲に送信する設定がありません。');return
+        self.engine.submit('send_set',([(0,raw) for raw in messages],setup_read_blocks(self.session.profile,scope)))
 
     def on_received(self,raw):
         try:
@@ -646,8 +668,7 @@ class MainWindow(QMainWindow):
         if not path:return
         try:
             if 'SMF' in kind or Path(path).suffix.lower() in ('.mid','.midi'):
-                if not path.lower().endswith(('.mid','.midi')):path=path.removesuffix('.mu.json')+'.mid'
-                write_midi(path,self.session.export_messages());self.status('SMF Format 1で設定を保存しました：'+path)
+                self.export_setup_midi(path)
             else:self.session.save(path);self.unsaved=False;self.refresh();self.status('保存しました：'+path)
         except Exception as exc:self.error(str(exc))
 
@@ -655,8 +676,19 @@ class MainWindow(QMainWindow):
         default=self.data_dir/'sessions'/'MU_setup.mid';default.parent.mkdir(exist_ok=True)
         path,_=QFileDialog.getSaveFileName(self,'SMF Format 1で設定を保存',str(default),'SMF Format 1 (*.mid)')
         if path:
-            try:write_midi(path,self.session.export_messages());self.status('SMF Format 1で設定を保存しました：'+path)
+            try:self.export_setup_midi(path)
             except Exception as exc:self.error(str(exc))
+
+    def export_setup_midi(self,path):
+        scope=self.choose_setup_scope('SMF Format 1で設定を保存','書き出す設定の範囲を選んでください。')
+        if scope is None:return
+        messages=self.session.export_messages(scope)
+        if scope is not SetupScope.ALL and not messages:
+            self.status('選択した範囲に書き出す設定がありません。');return
+        if not path.lower().endswith(('.mid','.midi')):
+            path=path.removesuffix('.mu.json')+'.mid'
+        write_midi(path,messages)
+        self.status('SMF Format 1で設定を保存しました：'+path)
 
     def load_session(self,path=None):
         if not isinstance(path,str):path,_=QFileDialog.getOpenFileName(self,'MUセットを開く',str(self.data_dir/'sessions'),'MU Set (*.mu.json)')

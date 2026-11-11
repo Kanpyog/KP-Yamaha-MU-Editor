@@ -16,9 +16,8 @@
 | MU5、MU5K、MU10、MU15、MU50、MU80、MU90、MU90B、MU90R、MU100、MU100B、MU100Bs、MU100R、MU128、MU128 V2 | 仕様書ベース・実機未確認 |
 | MU1000、MU2000、各EX／EX R1 | 仕様書ベース・実機、EFX3/4、バリエーションエフェクト27種、インサーションエフェクト54種未確認  |
 
-- Modular Synthesis Plug-in System（PLG）のパート割当はVL／SG／DX種別の試験機能です。
-- プラグインシステムボードの実機動作と内部音色編集、MU2000のサンプル編集・波形転送は対応範囲外です。
-- 入手性、需要の観点からMU1000/2000の確認予定はありません。
+- 入手性、需要の観点からModular Synthesis Plug-in System（PLG）対応機種（MU100、MU128、MU1000/2000）の確認予定はありません。PLGのパート割当はVL／SG／DX種別の試験機能で仕様書ベースの実装になります。実機確認は行っていません。故に動作を保証するものではありません。
+- 同様に、MU2000のサンプル編集・波形転送は確認手段が無いため対応範囲外です。
 
 ## 起動と接続
 
@@ -43,7 +42,7 @@
 - [ソースからの起動とビルド](docs/build.md)
 - [保存データの取り扱い](docs/security.md)
 
-[GPL-3.0-or-later](LICENSE)で配布します。著作者は干瓢碁です。[第三者ライセンス](docs/third-party-notices-ja.md)
+[GPL-3.0-or-later](LICENSE)で配布します。[第三者ライセンス](docs/third-party-notices-ja.md)
 
 ## 開発
 
