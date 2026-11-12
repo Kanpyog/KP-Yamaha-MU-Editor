@@ -1,4 +1,4 @@
-"""Synthetic MU500 frames for retries, cancellation and diagnostics."""
+"""Synthetic MU500 frames for sync, backup, cancellation and diagnostics."""
 import json
 from pathlib import Path
 import tempfile
@@ -50,58 +50,83 @@ class ReceiveTests(unittest.TestCase):
     def trace(self,report):
         return [json.loads(line) for line in Path(report['diagnostic_log']).read_text(encoding='utf-8').splitlines()]
 
-    def test_real_bad_frame_is_rejected_once_before_gui_then_retried(self):
-        self.e.transport=ReadTransport(lambda addr,n:[BAD if n==1 else GOOD])
-        result=self.read()
-        self.assertEqual(self.received,[GOOD])
-        self.assertEqual(result['count'],1);self.assertEqual(result['missing'],[])
-        self.assertEqual(result['invalid'],1);self.assertEqual(result['retry_requests'],1)
-        self.assertEqual(result['recovered'],1)
-        self.assertEqual(sum('チェックサム' in text for text in self.activity),1)
-        self.assertEqual(Path(result['backup']).read_bytes(),GOOD)
-        rx=[r for r in self.trace(result) if r['event']=='rx']
+    def test_bad_checksum_is_reported_and_sync_continues_at_normal_pace(self):
+        other_address=(8,0,0)
+        good=bulk(other_address,[64])
+        self.e.transport=ReadTransport(lambda addr,n:[BAD if addr==ADDRESS else good])
+        result=self.read([(0x4c,ADDRESS),(0x4c,other_address)])
+        self.assertEqual(self.received,[good])
+        self.assertEqual(result['count'],1)
+        self.assertEqual(result['missing'],[[0x4c,list(ADDRESS)]])
+        self.assertEqual(result['invalid'],1)
+        self.assertEqual(result['retry_requests'],0)
+        self.assertEqual(result['timings']['retry_wait_s'],0.)
+        self.assertEqual(self.e.transport.counts,{ADDRESS:1,other_address:1})
+        self.assertLess(self.clock.now-100.,.01)
+        self.assertEqual(Path(result['backup']).read_bytes(),good)
+        rows=self.trace(result)
+        rx=[r for r in rows if r['event']=='rx']
         self.assertEqual([r['valid'] for r in rx],[False,True])
         self.assertEqual(rx[0]['raw'],BAD.hex(' '))
+        self.assertEqual(next(r for r in rows if r['event']=='no_valid_response')['reason'],'rejected')
 
-    def test_final_recovery_pass_recovers_after_three_failed_requests(self):
+    def test_pre_write_backup_keeps_final_recovery_pass(self):
         self.e.transport=ReadTransport(lambda addr,n:[BAD if n<=3 else GOOD])
-        result=self.read()
-        self.assertEqual(result['missing'],[]);self.assertEqual(result['count'],1)
-        self.assertEqual(result['invalid'],3);self.assertEqual(result['retry_requests'],3)
-        self.assertEqual(len(self.e.transport.sent),4)
-        self.assertGreater(self.clock.now-100.,.2)
-        self.assertLess(self.clock.now-100.,.6)
-
-    def test_permanent_corruption_is_reported_and_never_imported_or_backed_up(self):
-        self.e.transport=ReadTransport(lambda addr,n:[BAD])
-        result=self.read()
-        self.assertEqual(self.received,[]);self.assertEqual(result['count'],0)
-        self.assertEqual(result['missing'],[[0x4c,list(ADDRESS)]])
-        self.assertEqual(result['backup'],'');self.assertEqual(result['invalid'],5)
-        self.assertEqual(len(self.e.transport.sent),5)
-
-    def test_corrupt_manufacturer_is_recorded_without_repairing_it(self):
-        good=bytes([0xf0,0x43])+FOREIGN[2:]
-        self.e.transport=ReadTransport(lambda addr,n:[FOREIGN if n==1 else good])
-        result=self.read([(0x4c,(0x32,0x18,0x50))])
-        self.assertEqual(self.received,[good]);self.assertEqual(result['unrecognized'],1)
+        result=self.e._read([(0x4c,ADDRESS)],'送信前バックアップ',False,retry=True)
+        self.assertEqual(result['missing'],[])
         self.assertEqual(result['count'],1)
+        self.assertEqual(result['invalid'],3)
+        self.assertEqual(result['retry_requests'],3)
+        self.assertEqual(len(self.e.transport.sent),4)
+        self.assertEqual(self.received,[])
+        self.assertEqual(Path(result['backup']).read_bytes(),GOOD)
+
+    def test_incomplete_backup_stops_set_send(self):
+        transport=ReadTransport(lambda addr,n:[BAD])
+        transport.close=lambda:None
+        self.e.transport=transport
+        errors=[]
+        def on_failed(message):
+            errors.append(message)
+            self.e.shutdown.set()
+        self.e.failed.connect(on_failed)
+        self.e.submit('send_set', ([(0,GOOD)],[(0x4c,ADDRESS)]))
+        with patch.object(self.e,'_send_batch') as send_batch:
+            self.e._run()
+        send_batch.assert_not_called()
+        self.assertEqual(len(errors),1)
+        self.assertIn('バックアップに未取得項目',errors[0])
+        self.assertEqual(transport.counts,{ADDRESS:5})
+
+    def test_corrupt_manufacturer_is_recorded_without_repairing_or_retrying(self):
+        address=(0x32,0x18,0x50)
+        self.e.transport=ReadTransport(lambda addr,n:[FOREIGN])
+        result=self.read([(0x4c,address)])
+        self.assertEqual(self.received,[])
+        self.assertEqual(result['unrecognized'],1)
+        self.assertEqual(result['count'],0)
+        self.assertEqual(result['missing'],[[0x4c,list(address)]])
+        self.assertEqual(result['backup'],'')
+        self.assertEqual(self.e.transport.counts,{address:1})
         self.assertIn(FOREIGN.hex(' '),Path(result['diagnostic_log']).read_text(encoding='utf-8'))
 
     def test_unrelated_valid_addresses_and_devices_do_not_complete_request(self):
-        unrelated=bulk((8,0,0),[64]);wrong_device=bulk(ADDRESS,parse(GOOD).data,device=1)
-        self.e.transport=ReadTransport(lambda addr,n:[unrelated,wrong_device] if n==1 else [GOOD])
+        unrelated=bulk((8,0,0),[64])
+        wrong_device=bulk(ADDRESS,parse(GOOD).data,device=1)
+        self.e.transport=ReadTransport(lambda addr,n:[unrelated,wrong_device])
         result=self.read()
-        self.assertEqual(result['count'],1);self.assertEqual(result['retry_requests'],1)
+        self.assertEqual(result['count'],0)
+        self.assertEqual(result['missing'],[[0x4c,list(ADDRESS)]])
+        self.assertEqual(result['retry_requests'],0)
         self.assertNotIn(wrong_device,self.received)
-        self.assertEqual(split_sysex(Path(result['backup']).read_bytes()),[GOOD])
+        self.assertEqual(result['backup'],'')
 
     def test_notify_false_keeps_session_untouched_but_creates_backup(self):
         self.e.transport=ReadTransport(lambda addr,n:[GOOD])
         result=self.e._read([(0x4c,ADDRESS)],'送信前バックアップ',False)
         self.assertEqual(self.received,[]);self.assertEqual(result['count'],1)
 
-    def test_cancel_during_wait_stops_retries(self):
+    def test_cancel_during_wait_stops_the_read(self):
         self.e.transport=ReadTransport(lambda addr,n:[])
         original_sleep=self.clock.sleep
         def cancel(seconds):
@@ -131,26 +156,27 @@ class ReceiveTests(unittest.TestCase):
         with patch('kp_mu_editor.engine.ReadTrace',side_effect=OSError('read only')):result=self.read()
         self.assertEqual(result['count'],1);self.assertEqual(result['diagnostic_log'],'')
 
-    def test_silent_dropout_is_retried_without_misreporting_corruption(self):
-        self.e.transport=ReadTransport(lambda addr,n:[] if n==1 else [GOOD])
+    def test_silent_dropout_is_reported_after_one_request(self):
+        self.e.transport=ReadTransport(lambda addr,n:[])
         result=self.read()
-        self.assertEqual(self.received,[GOOD]);self.assertEqual(result['invalid'],0)
-        self.assertEqual(result['retry_requests'],1);self.assertEqual(result['missing'],[])
+        self.assertEqual(self.received,[])
+        self.assertEqual(result['invalid'],0)
+        self.assertEqual(result['retry_requests'],0)
+        self.assertEqual(result['missing'],[[0x4c,list(ADDRESS)]])
+        self.assertEqual(result['timings']['timeouts'],1)
+        self.assertEqual(len(self.e.transport.sent),1)
 
-    def test_valid_late_response_during_backoff_avoids_needless_retransmission(self):
-        transport=ReadTransport(lambda addr,n:[BAD]);original=transport.poll
-        sent_late=False
-        def poll():
-            nonlocal sent_late
-            packets=original()
-            if self.clock.now>=100.01 and not sent_late:
-                packets.append((4,GOOD,self.clock.now));sent_late=True
-            return packets
-        transport.poll=poll;self.e.transport=transport
-        result=self.read()
-        self.assertEqual(result['count'],1);self.assertEqual(result['retry_requests'],0)
-        self.assertEqual(len(transport.sent),1);self.assertEqual(self.received,[GOOD])
-        self.assertLess(result['timings']['retry_wait_s'],.025)
+    def test_late_valid_reply_is_captured_while_reading_another_block(self):
+        other_address=(8,0,0)
+        other=bulk(other_address,[64])
+        self.e.transport=ReadTransport(lambda addr,n:[BAD] if addr==ADDRESS else [GOOD,other])
+        result=self.read([(0x4c,ADDRESS),(0x4c,other_address)])
+        self.assertEqual(result['count'],2)
+        self.assertEqual(result['missing'],[])
+        self.assertEqual(result['retry_requests'],0)
+        self.assertEqual(self.e.transport.counts,{ADDRESS:1,other_address:1})
+        self.assertEqual(self.received,[GOOD,other])
+        self.assertEqual(split_sysex(Path(result['backup']).read_bytes()),[GOOD,other])
 
     def test_worker_reset_orders_panic_reset_wait_and_read_without_real_midi(self):
         class Fake:

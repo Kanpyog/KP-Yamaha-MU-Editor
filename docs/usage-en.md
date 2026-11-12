@@ -6,7 +6,7 @@
 
 Set up your USB or MIDI connection, select the MU model, and open **Connect**. Select the input from the unit and assign its sound engine outputs to A–D. On the MU500 USB connection, outputs 1–4 address the internal sound engine. Outputs 5–8 route to MIDI OUT.
 
-Use **Read from device** to get the current settings. Unread values are shown using initial values as a reference. If the read reports missing blocks, check the ports and read again.
+Use **Read from device** to get the current settings. The editor requests each block once and reports any unread blocks at the end. Unread settings keep their previous or initial values. Check the MIDI connection and read again if needed.
 
 ## Edit and audition
 

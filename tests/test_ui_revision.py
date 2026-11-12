@@ -1,9 +1,10 @@
 """GUI behavior with a recording MIDI engine; never opens hardware ports."""
 import tempfile,unittest,json
 from pathlib import Path
+from unittest.mock import patch
 from PySide6.QtCore import Qt,QPointF,QEvent
 from PySide6.QtGui import QMouseEvent,QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication,QMessageBox
 from kp_mu_editor.app import MainWindow,configure_application
 from kp_mu_editor.schema import PART_BY_KEY,PROFILES,DRUM,Param
 from kp_mu_editor.session import Session
@@ -63,12 +64,20 @@ class RevisionGui(unittest.TestCase):
     def packets(self):return [parse(raw) for port,raw in self.w.engine.sent if raw[:2]==b'\xf0\x43']
 
     def test_partial_read_is_visible_in_status_and_logged_with_details(self):
-        self.w.on_finished('全設定取得',{'count':1,'missing':[[76,[8,0,0]]],'recovered':2,'invalid':3,'cancelled':False})
+        self.w.on_finished('全設定取得',{'count':1,'missing':[[76,[8,0,0]]],'invalid':1,'cancelled':False})
         message=self.w.statusBar().currentMessage()
-        self.assertIn('未取得 1件',message);self.assertIn('自動再取得 2件',message)
+        self.assertIn('未取得 1件',message)
         self.assertIn('前回値または初期値',message)
         log=self.w.settings.monitor.toPlainText()
-        self.assertIn('READ SUMMARY',log);self.assertIn('NO RESPONSE',log)
+        self.assertIn('READ SUMMARY',log);self.assertIn('UNREAD BLOCKS',log)
+
+    def test_mode_change_queues_reset_with_settling_time_before_read(self):
+        with (patch('kp_mu_editor.app.QMessageBox.question',return_value=QMessageBox.StandardButton.Yes),
+              patch.object(self.w.engine,'send') as send,
+              patch.object(self.w,'read_all') as read_all):
+            self.w.mode_changed('GM2')
+            send.assert_called_once_with([(0,bytes.fromhex('F0 7E 7F 09 03 F7'))],'モード切替',interval=.1)
+            read_all.assert_called_once_with()
 
     def test_preferences_and_prominent_master_fields(self):
         w=self.w;self.assertEqual(w.nav.count(),7);self.assertFalse(hasattr(w,'live'))

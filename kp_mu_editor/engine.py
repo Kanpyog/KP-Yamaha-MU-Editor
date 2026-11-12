@@ -60,7 +60,7 @@ class Engine(QObject):
     def stop(self):
         self.cancel.set();self.submit('stop')
 
-    def _poll(self,captured=None,notify=True):
+    def _poll(self,captured=None,notify=True,*,requested=None):
         rejected=set()
         if not self.transport:return rejected
         if self.diagnostics and self.diagnostics.debug and time.monotonic()-self._health_at>=5:
@@ -93,7 +93,9 @@ class Engine(QObject):
                     self._read_trace.record('rx',source=source,raw=raw.hex(' '),valid=packet is not None,driver_time=stamp)
                 if packet and packet.device==self.device:
                     if notify:self.received.emit(raw)
-                    if captured is not None and packet.data:captured[(packet.model,packet.address)]=raw
+                    key=(packet.model,packet.address)
+                    if captured is not None and packet.data and (requested is None or key in requested):
+                        captured[key]=raw
                     if packet.model==0x4c and len(packet.data)>=2 and ((packet.address[0]==3 and packet.address[2]==0) or (packet.address[:2]==(2,1) and packet.address[2] in (0,0x20,0x40))):
                         self.effect_types[packet.address]=tuple(packet.data[:2])
                 self.activity.emit('RX '+raw.hex(' ')[:180])
@@ -117,9 +119,9 @@ class Engine(QObject):
         self.activity.emit('TX '+raw.hex(' ')[:180])
         return elapsed
 
-    def _read(self,blocks,label,notify=True,clear_cancel=True):
+    def _read(self,blocks,label,notify=True,clear_cancel=True,*,retry=False):
         blocks=list(blocks)
-        captured={};pending=[];skipped=0;retry_requests=0;recovered=0
+        captured={};requested={};pending=[];skipped=0;retry_requests=0;recovered=0
         gap=.008;last_request=0.;good_streak=0;read_started=time.monotonic()
         if clear_cancel:self.cancel.clear()
         timings={'pacing_wait_s':0.,'retry_wait_s':0.,'send_ms':0.,'response_wait_s':0.,'timeouts':0,'rejected_responses':0}
@@ -131,23 +133,19 @@ class Engine(QObject):
         self._read_trace=trace
         stats={'invalid':0,'unrecognized':0};self._read_stats=stats
 
-        def wait(seconds,replies=None,key=None):
+        def wait(seconds,key=None):
             deadline=time.monotonic()+max(0,seconds)
             while not self.cancel.is_set() and time.monotonic()<deadline:
-                # Continue draining input during backoff, without treating late
-                # replies as the response to a different requested block.
-                self._poll(replies,notify=notify)
-                if replies is not None and key in replies:break
+                self._poll(captured,notify,requested=requested)
+                if key in captured:break
                 time.sleep(min(.003,max(0,deadline-time.monotonic())))
 
         def read_block(block,attempts,recovery=False):
             nonlocal gap,last_request,good_streak,retry_requests,recovered
             model,address=block[:2];address=tuple(address)
             parameter=bool(len(block)>2 and block[2]);key=(model,address)
-            replies={}
             def accept(attempt,waiting,late=False):
                 nonlocal gap,good_streak,recovered
-                captured[key]=replies[key]
                 if attempt or recovery:recovered+=1
                 good_streak+=1
                 if good_streak>=8:gap=max(.008,gap/2);good_streak=0
@@ -161,27 +159,33 @@ class Engine(QObject):
                 if self.cancel.is_set():return False
                 if attempt or recovery:
                     delay=max(.025,gap)*(attempt+1)
-                    waiting=time.monotonic();wait(delay,replies,key)
+                    waiting=time.monotonic();wait(delay,key)
                     timings['retry_wait_s']+=time.monotonic()-waiting
-                    if key in replies:return accept(attempt,waiting,True)
+                    if key in captured:return accept(attempt,waiting,True)
                 else:
                     delay=max(0,gap-(time.monotonic()-last_request));waiting=time.monotonic();wait(delay)
                     timings['pacing_wait_s']+=time.monotonic()-waiting
                 if self.cancel.is_set():return False
                 if attempt or recovery:retry_requests+=1
+                requested[key]=None
                 last_request=time.monotonic()
                 timings['send_ms']+=self._send(request(address,model=model,parameter=parameter)) or 0
                 deadline=time.monotonic()+(.35 if recovery else .20)
                 waiting=time.monotonic();reason='timeout'
                 while time.monotonic()<deadline and not self.cancel.is_set():
-                    rejected=self._poll(replies,notify)
-                    if key in replies:
+                    rejected=self._poll(captured,notify,requested=requested)
+                    if key in captured:
                         elapsed=time.monotonic()-waiting;timings['response_wait_s']+=elapsed
                         return accept(attempt,waiting)
                     if key in rejected:reason='rejected';break
                     time.sleep(.002)
                 timings['response_wait_s']+=time.monotonic()-waiting
-                if not self.cancel.is_set():timings['timeouts' if reason=='timeout' else 'rejected_responses']+=1
+                if self.cancel.is_set():return False
+                timings['timeouts' if reason=='timeout' else 'rejected_responses']+=1
+                if not retry:
+                    self.diagnose('read_no_valid_response',model=model,address=address,reason=reason)
+                    if trace:trace.record('no_valid_response',model=model,address=list(address),reason=reason)
+                    return False
                 good_streak=0;gap=min(.05,max(.025,gap*2))
                 self.diagnose('read_retry',model=model,address=address,attempt=attempt+1,recovery=recovery,reason=reason,gap_ms=gap*1000)
                 if trace:trace.record('retry',model=model,address=list(address),attempt=attempt+1,recovery=recovery,reason=reason,gap_ms=gap*1000)
@@ -195,26 +199,26 @@ class Engine(QObject):
                 if model==0x4c and address[0]==3 and 0x30<=address[2]<=0x42:
                     type_packet=captured.get((0x4c,(3,address[1],0)))
                     if type_packet and parse(type_packet).data[0] not in (5,6,7,8):skipped+=1;continue
-                if not read_block(block,3):pending.append(block)
+                if not read_block(block,3 if retry else 1) and retry:pending.append(block)
                 if i%8==0:self.progress.emit(i+1,len(blocks),label)
-            # One slower recovery pass. Only validated responses to the exact
-            # requested address enter the backup; never repair bytes by guessing.
+            # Recovery is only used for the complete backup required before writing.
             for i,block in enumerate(pending):
                 if self.cancel.is_set():break
+                if (block[0],tuple(block[1])) in captured:continue
                 gap=.05
                 self.progress.emit(i+1,len(pending),label+'・未取得を再試行')
                 read_block(block,2,True)
             completed=True
         finally:
+            missing=[[model,list(address)] for model,address in requested if (model,address) not in captured]
             if trace:
                 trace.record('end',count=len(captured),cancelled=self.cancel.is_set(),completed=completed,
                              retry_requests=retry_requests,recovered=recovered,
-                             missing=[[b[0],list(b[1])] for b in pending if (b[0],tuple(b[1])) not in captured],
+                             missing=missing,
                              elapsed_s=time.monotonic()-read_started,timings=timings,**stats)
                 trace.close()
                 if trace.error:self.activity.emit('取得診断ログの保存エラー：'+trace.error)
             self._read_trace=None;self._read_stats=None
-        missing=[[block[0],list(block[1])] for block in pending if (block[0],tuple(block[1])) not in captured]
         self.progress.emit(len(captured),len(blocks)-skipped,label)
         if captured:
             folder=self.data_dir/'backups';folder.mkdir(parents=True,exist_ok=True)
@@ -320,7 +324,7 @@ class Engine(QObject):
                     self._send_batch(*payload)
                 elif kind=='send_set':
                     messages,blocks=payload
-                    backup=self._read(blocks,'送信前バックアップ',False)
+                    backup=self._read(blocks,'送信前バックアップ',False,retry=True)
                     if backup['cancelled']:continue
                     if not backup['count'] or backup['missing']:
                         raise RuntimeError('送信前のバックアップに未取得項目があるため、一括送信を停止しました。接続と機種を確認してください。')

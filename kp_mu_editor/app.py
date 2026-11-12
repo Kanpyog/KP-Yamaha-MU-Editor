@@ -218,11 +218,11 @@ class MainWindow(QMainWindow):
             if transmit and self.can_send():self.send_messages(messages,label_text)
         except Exception as exc:self.error(str(exc))
 
-    def send_messages(self,messages,label_text):
+    def send_messages(self,messages,label_text,*,interval=.005):
         if self._reset_pending:self.status('XG RESETと再取得が終わるまでお待ちください。');return
         if not self.engine.connected:self.status('未接続：PC上の設定を変更しました。接続すると編集した値を即時送信します。');return
         if not self.device_matches():self.error('選択機種と検出した本体が異なります。機種と接続先を確認してください。');return
-        self.engine.send(messages,label_text,interval=.005)
+        self.engine.send(messages,label_text,interval=interval)
 
     def channel(self,n=None):
         n=self.selected_part if n is None else n
@@ -373,7 +373,9 @@ class MainWindow(QMainWindow):
             self.mode.blockSignals(True);self.mode.setCurrentText(old);self.mode.blockSignals(False);return
         resets={'XG':'F0 43 10 4C 00 00 7E 00 F7','GM':'F0 7E 7F 09 01 F7','GM2':'F0 7E 7F 09 03 F7','TG300B':TG300B_SYSTEM_ON.hex(),'GS':TG300B_SYSTEM_ON.hex()}
         self.session.checkpoint('モード変更');self.session.mode=mode;self.mark_changed()
-        if mode in resets and self.engine.connected:self.send_messages([(0,bytes.fromhex(resets[mode]))],'モード切替');self.read_all()
+        if mode in resets and self.engine.connected:
+            self.send_messages([(0,bytes.fromhex(resets[mode]))],'モード切替',interval=.1)
+            self.read_all()
         elif mode=='Performance':self.status('本体側をPerformanceモードに切り替えてください。機種固有画面から番号を呼び出せます。')
 
     def can_send(self):
@@ -630,12 +632,11 @@ class MainWindow(QMainWindow):
             self.refresh_pending=True;self.recovery_timer.start()
             missing=details.get('missing',[])
             suffix=f' / 未取得 {len(missing)}件（前回値または初期値が残ります）' if missing else ''
-            if details.get('recovered'):suffix+=f' / 自動再取得 {details["recovered"]}件'
             if details.get('cancelled'):suffix+=' / 中断'
             if details.get('elapsed_s') is not None:suffix+=f' / {details["elapsed_s"]:.1f}秒'
             self.status(f'{text}：{details.get("count",0):,}ブロック取得'+suffix)
             self.log('READ SUMMARY '+json.dumps(details,ensure_ascii=False))
-            if missing:self.log('NO RESPONSE '+json.dumps(missing))
+            if missing:self.log('UNREAD BLOCKS '+json.dumps(missing))
         elif text=='再生完了':
             if self.loop.isChecked():self.play()
             elif self.session.profile.tg300b_catalog and self.session.mode=='TG300B' and self.keep_setup.isChecked():

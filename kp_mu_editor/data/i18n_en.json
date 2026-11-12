@@ -197,7 +197,6 @@
   "同じ出力をA～Dに重複して割り当てることはできません。": "The same MIDI output cannot be assigned to more than one of A-D.",
   " / 未取得 ": " / Missing: ",
   "件（前回値または初期値が残ります）": " blocks (previous or initial values retained)",
-  " / 自動再取得 ": " / Recovered: ",
   "件": " items",
   "秒": " s",
   "再生完了": "Playback finished",
