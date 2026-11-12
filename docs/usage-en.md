@@ -1,41 +1,43 @@
-# Connection and controls
+# Connection, basic controls, and troubleshooting
 
-[README](../README_EN.md) · [日本語ガイド](usage-ja.md)
+> This page was written by AI.
+
+[README](../README_EN.md) · [日本語](usage-ja.md)
 
 ## Connect the MU
 
-Set up your USB or MIDI connection, select the MU model, and open **Connect**. Select the input from the unit and assign its sound engine outputs to A–D. On the MU500 USB connection, outputs 1–4 address the internal sound engine. Outputs 5–8 route to MIDI OUT.
+Connect the unit by USB or MIDI and select your model at the top of the window. Open **Connect** and choose the **Input from device** and the outputs for the sound engine. Reading settings requires an input from the device.
 
-Use **Read from device** to get the current settings. The editor requests each block once and reports any unread blocks at the end. Unread settings keep their previous or initial values. Check the MIDI connection and read again if needed.
+For a direct USB connection to the MU500, set its **HOST SELECT** switch to **USB**. Assign USB outputs 1–4 to outputs A–D in the editor to access all 64 parts. USB ports 5–8 can route to an external sound module through MIDI OUT using the Thru Port setting. [Yamaha USB-MIDI driver](https://usa.yamaha.com/support/updates/usb-midi-driver-win.html)
 
-## Edit and audition
+## Read from the device
 
-- Select a part in the mixer and double-click a voice in the browser. Search by name or an identifier such as `99-0-42`. Program numbers on screen are 1–128.
-- On the MU500 in TG300B mode, the browser also offers variation voices and drum kits. Parts that share a Drum Setup use the same kit.
-- Drag numeric fields up or down, double-click them, or type a value. Bold green values differ from their initial settings.
-- Edit model-specific settings on the Part, Drums and Effects pages. Parts that use the same Drum Setup share per-note changes.
-- Use the audition keyboard and its octave control to reach lower drum notes. **ALL NOTES OFF** releases sounding notes.
+Choose **Read from device**, then select all settings, effects only, or drum map only. The editor requests each block once and reports the number of unread blocks when it finishes. Unread settings keep their previous or initial values.
 
-## Save and restore
+## Voices and parts
 
-Device reads are backed up under `userdata/backups/`. Use **Save** for JSON sets or SMF Format 1. The Library handles SysEx import and export.
+- Select a part in the mixer and double-click a voice in the browser. Search by name or an identifier such as `99-0-42`. Program numbers on screen run from 1 to 128.
+- On the MU500 in TG300B mode, you can also select variation voices and drum kits. Parts that use the same Drum Setup share the kit and per-note settings.
+- Drag numeric fields up or down, double-click them, or type a value. Values that differ from their initial settings appear in bold green.
+- Use the keyboard at the bottom to audition sounds. Lower the octave to reach lower drum notes. Use **ALL NOTES OFF** to release sounding notes.
 
-When exporting SMF, reading from the device, or sending to it, choose all settings, effects only, or drum map only. Effect settings include routing, sends, and EQ. Drum maps contain per-note settings for each Drum Setup. Partial exports and transfers preserve voice and kit selections. In a sequencer, place the drum map SysEx after the Program Change that selects the kit.
+## Save and send settings
 
-Opening a set loads it on the PC. Choose **Send to device** to apply it. A bulk send first backs up the current device state, then verifies bulk blocks by reading them back.
+Use **Save** to export an MU set (JSON) or an SMF Format 1 file. Use the **Library** to import and export SysEx. Data read from the device is also saved in `userdata/backups/`.
 
-**XG RESET** confirms the action, backs up the settings currently held on the PC, resets the unit to its XG initial state and reads it again. Read and save any changes made on the hardware before resetting.
+SMF export and **Send to device** offer the same scopes as device reads. Effects include assignments, send levels, and EQ. Drum maps contain per-note settings for each Drum Setup. Both partial scopes preserve voice and drum kit selections when exporting or sending. In a sequencer, place the drum map SysEx after the Program Change that selects the kit.
+
+Open the saved MU set, connect to the unit, then choose **Send to device**. A bulk send first reads and backs up the device settings, then reads back the settings sent in bulk to verify them.
+
+After confirmation, **XG RESET** backs up the settings held on the PC, returns the unit to its XG initial state, and reads the settings again. To keep changes made on the device, read and save them before resetting.
 
 ## Play MIDI files
 
-Select an SMF Format 0 or 1 file and play it through the connected MU. **Use song voices/settings** also sends supported bank, program and setup messages. A song with a GM, GM2 or XG reset may change device settings.
+Use **MIDI file** at the bottom to select an SMF Format 0 or 1 file and play it through the connected MU. Enable **Use song voices/settings** to send supported Bank Select, Program Change, and setup SysEx messages as well. A song containing an initialization message may change device settings.
 
 ## Display and troubleshooting
 
-On first launch, the menus are in Japanese. To switch to English, open **編集 → 環境設定 → Language** and select **英語（Eng）**. The top bar switches between light and dark modes.
+On first launch, the editor uses Japanese and the dark theme. Change the language under **編集 (Edit) → 環境設定 (Preferences) → Language**. Use the top bar to switch themes.
 
-If a device read is slow or the connection drops, check the model and MIDI port assignments. Open **MIDI Log** from the top bar to check MIDI traffic.
-
-### Submit a log
-
-If you are asked for a log to help troubleshoot a problem, choose **Edit → Preferences → Diagnostics → Export diagnostic logs**. Share the ZIP and the time the problem occurred. [Stored data and sharing](security-en.md)
+- **The MU is missing from the port list** — Check the power, connection, and MIDI driver.
+- **Some settings are unread** — Check the model, MIDI inputs and outputs, and Device Number, then read the required settings again. Open **MIDI Log** from the top bar to check MIDI traffic.

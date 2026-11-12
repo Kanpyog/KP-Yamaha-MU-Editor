@@ -1,16 +1,17 @@
-# Model compatibility
+# Model compatibility and hardware testing
 
 [README](../README_EN.md) · [日本語](compatibility.md)
 
 | Models | Verification |
 | --- | --- |
 | MU500 | Tested on hardware |
-| MU5, MU5K, MU10, MU15, MU50, MU80, MU90, MU90B, MU90R, MU100, MU100B, MU100Bs, MU100R, MU128, MU128 V2 | Based on the MIDI documentation. Untested on hardware. |
-| MU1000, MU2000, and their EX and EX R1 variants | Based on the MIDI documentation. Hardware operation, EFX 3/4, 27 variation effects, and 54 insertion effects are unverified. |
+| MU5, MU5K, MU10, MU15, MU50, MU80, MU90, MU90B, MU90R, MU100, MU100B, MU100Bs, MU100R, MU128, MU128 V2 | Based on the documentation and untested on hardware (note 1) |
+| MU1000, MU2000, and their EX and EX R1 variants | Based on the documentation, untested on hardware, and unsupported (notes 1 and 2) |
 
-MU5 models use a model-specific MIDI format. Part counts, voice maps, effects, and A/D input controls vary by model and operating mode. XG is the primary editing mode.
+- Note 1. Hardware testing of PLG-capable models (the MU100, MU128, MU1000, and MU2000 families) is unscheduled due to availability and demand. PLG part assignment for VL, SG, and DX boards is experimental and based on the documentation. Board operation is untested, and editing the boards' internal voices is outside the scope of the editor.
+- Note 2. The differences from the MU500 that remain unverified include EFX 3/4, 27 additional variation effects, and 54 additional insertion effects. MU2000 sample editing and waveform transfer are unsupported.
 
-PLG part assignment is experimental for VL, SG, and DX board types. Plug-in board operation on hardware, editing the boards' internal voices, MU2000 sample editing, and waveform transfer are outside the scope of this editor.
+The MU5 family uses its own MIDI format. The editor focuses on XG. Part counts, voice maps, effects, and A/D inputs vary by model and operating mode.
 
 ## Yamaha MIDI documentation
 

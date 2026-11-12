@@ -15,7 +15,7 @@ from kp_mu_editor import __version__ as VERSION
 APP_DOCS = (
     'README.md', 'README_EN.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
     'docs/build.md', 'docs/build-en.md', 'docs/compatibility.md', 'docs/compatibility-en.md',
-    'docs/security.md', 'docs/security-en.md', 'docs/usage-ja.md', 'docs/usage-en.md',
+    'docs/usage-ja.md', 'docs/usage-en.md',
     'docs/third-party-notices-ja.md', 'images/kp_yamaha_mu_editor.jpg',
 )
 PUBLIC_FILES = (
