@@ -21,10 +21,9 @@ This is a standalone MIDI editor and controller for operating Yamaha's “MU Ser
 
 ## System requirements
 
-- Windows 11 64-bit (x64). Launch tested on version 26H2.
-- A direct USB connection to the MU or a MIDI interface that works with Windows 11. For direct USB, use the MIDI driver appropriate for your model.
+- Supported Versions of Windows 11 64-bit (x64)
+- A USB connection to the MU unit itself, or a MIDI interface compatible with Windows 11.
 - About 135 MB of disk space after extraction. Startup memory use is approximately 220 MB.
-- The packaged EXE runs without a separate Python installation.
 
 ## Features
 
