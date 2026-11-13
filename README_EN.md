@@ -6,7 +6,7 @@
 
 ## Overview
 
-A standalone MIDI editor and controller for Yamaha MU-series hardware sound modules on Windows 11. It started with the idea of making an MU equivalent of Mix88, the SC-88Pro editor.
+This is a standalone MIDI editor and controller for operating Yamaha's “MU Series” hardware sound modules on Windows 11. It was created based on the idea of developing an MU version of “Mix88,” the editor software for the SC-88Pro.
 
 ## Supported models
 
@@ -16,7 +16,7 @@ A standalone MIDI editor and controller for Yamaha MU-series hardware sound modu
 | MU5, MU5K, MU10, MU15, MU50, MU80, MU90, MU90B, MU90R, MU100, MU100B, MU100Bs, MU100R, MU128, MU128 V2 | Based on the documentation and untested on hardware (note 1) |
 | MU1000, MU2000, and their EX and EX R1 variants | Based on the documentation, untested on hardware, and unsupported (notes 1 and 2) |
 
-- Note 1. Hardware testing of PLG-capable models (the MU100, MU128, MU1000, and MU2000 families) is unscheduled due to availability and demand. PLG part assignment for VL, SG, and DX boards is experimental and based on the documentation. Board operation is untested, and editing the boards' internal voices is outside the scope of the editor.
+- Note 1. Due to hardware availability and demand, we do not plan to test PLG-compatible models (MU100, MU128, MU1000/MU2000 series) on actual units. The PLG part assignments are test functions for VL, SG, and DX implemented based on the specifications. The operation of the PLG board has not been verified, and editing sounds within the board is not supported.
 - Note 2. The differences from the MU500 that remain unverified include EFX 3/4, 27 additional variation effects, and 54 additional insertion effects. MU2000 sample editing and waveform transfer are unsupported.
 
 ## System requirements
