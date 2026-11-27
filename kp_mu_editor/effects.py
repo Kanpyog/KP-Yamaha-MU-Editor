@@ -1,7 +1,7 @@
 from dataclasses import replace
 from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QTabBar,QComboBox,QInputDialog
 from .widgets import page,button,label,ParamTabs,InlineParams,value_style
-from .schema import read_blocks
+from .schema import read_blocks,supports_setup_write
 from .protocol import change
 from .effect_parameters import build_effect_parameters
 from .i18n import QTabBar,QComboBox,QInputDialog
@@ -62,7 +62,7 @@ class Effects(QWidget):
         self.form.refresh(s,self.address()[1]);self.routing.refresh(s,self.address()[1])
         if self.kind=='insertion':
             assignment=s.get(next(x for x in self.routing.params if x.key=='part'),self.slot)
-            source=a.part_name(assignment) if assignment<p.parts else f'A/D {assignment-63}' if p.ad and assignment in (64,65) else ''
+            source=a.part_name(assignment) if assignment<p.parts else f'A/D {assignment-63}' if 64<=assignment<64+p.ad_parts else ''
             route=f'{source} → EFX{self.slot+1} → 出力' if source else f'EFX{self.slot+1}：Off（割当なし）'
         elif self.kind=='variation':
             connection=next(x for x in self.routing.params if x.key=='connection')
@@ -74,11 +74,12 @@ class Effects(QWidget):
         params=build_effect_parameters(self,fx);result=[];profile=self.app.session.profile
         for param in params:
             if param.key=='part':
-                values=(127,*range(profile.parts),*((64,65) if profile.ad else ()))
-                names=('Off',*(f'{chr(65+n//16)}{n%16+1}' for n in range(profile.parts)),*(('A/D 1','A/D 2') if profile.ad else ()))
+                values=(127,*range(profile.parts),*range(64,64+profile.ad_parts))
+                names=('Off',*(f'{chr(65+n//16)}{n%16+1}' for n in range(profile.parts)),*(f'A/D {n+1}' for n in range(profile.ad_parts)))
                 param=replace(param,label='割当Part',choices=tuple(names),choice_values=tuple(values))
             if param.key=='connection':param=replace(param,label='接続方式',choices=('Insertion','System'))
-            result.append(param)
+            if supports_setup_write(profile,param.model,param.address(self.address()[1]),param.size):
+                result.append(param)
         return result
 
     def changed(self,param,value):
@@ -92,7 +93,9 @@ class Effects(QWidget):
         if a.session.get_bytes(0x4c,address,2) is None:
             a.session.put(0x4c,address,old,'未取得 / 初期値',False);a.session.fields[(0x4c,*address)]=2
         a.session.checkpoint('エフェクト種類変更');a.session.invalidate_effect(address);a.session.put(0x4c,address,new);a.mark_changed()
-        if a.can_send():a.send_messages([(0,change(address,new))],'エフェクト種類変更');self.read()
+        if a.can_send():
+            a.send_messages([(0,change(address,new))],'エフェクト種類変更')
+            if a.session.profile.supports_readback:self.read()
         self.signature=None;self.refresh()
 
     def direct_type(self):

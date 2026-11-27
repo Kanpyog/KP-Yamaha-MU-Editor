@@ -13,11 +13,19 @@
 
 The MU5 family uses its own MIDI format. The editor focuses on XG. Part counts, voice maps, effects, and A/D inputs vary by model and operating mode.
 
+The MU10 supports individual MIDI edits, playback, and XG RESET. Reading settings and sending a complete set with readback verification are unavailable. On models with readback, the editor requests the settings supported by the selected model after XG RESET.
+
+## LCD display
+
+Supported models are the MU15, MU50, MU80, MU90, MU90R, MU100, MU100R, MU128, MU128 V2, MU1000, MU2000, and their EX and EX R1 versions. MU128 V2 and the EX and EX R1 versions use the base models' XG display specifications. LCD support is based on documentation and untested on hardware. On the MU500, which has no LCD, editing and MIDI embedding are available.
+
 ## Yamaha MIDI documentation
 
 - [MU500](https://data.yamaha.com/files/download/other_assets/8/316818/MU500J.PDF)
 - [MU1000 / MU2000](https://data.yamaha.com/files/download/other_assets/2/316512/MU2000J2.pdf)
 - [MU5](https://data.yamaha.com/files/download/other_assets/6/318376/MU5S.pdf)
+- [MU10](https://ca.yamaha.com/files/download/other_assets/5/318065/MU10E.pdf)
+- [MU15](https://data.yamaha.com/files/download/other_assets/2/318082/MU15E.pdf)
 - [MU50](https://data.yamaha.com/files/download/other_assets/2/318072/MU50E2.pdf)
 - [MU80](https://data.yamaha.com/files/download/other_assets/5/317065/MU80F2.pdf)
 - [MU90 / MU90R](https://data.yamaha.com/files/download/other_assets/8/316488/MU90RJ1.pdf)

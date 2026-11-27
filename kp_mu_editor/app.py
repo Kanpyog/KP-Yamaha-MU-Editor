@@ -9,10 +9,11 @@ from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBo
  QFileDialog,QDialog,QDialogButtonBox,QFormLayout,QGroupBox,QScrollArea,QLineEdit,QPushButton)
 from . import __version__
 from .session import Session,atomic_write,read_bounded_file
-from .schema import PROFILES,PART_BY_KEY,part_params,read_blocks,setup_read_blocks,SetupScope,CC_PART,Param
+from .schema import PROFILES,PART_BY_KEY,part_params,read_blocks,setup_read_blocks,SetupScope,CC_PART,Param,supports_setup_write
 from .protocol import change,cc,parse,encode,TG300B_SYSTEM_ON
 from .catalog import Catalog
 from .engine import Engine,load_midi,write_midi
+from .smf import embed_lcd_midi
 from .widgets import button,label,GESTURES,value_style,DragSpinBox as QSpinBox
 from .pages import Mixer,Voices,Parts,Drums,Effects,Layers,Library,Settings
 from .winmm import ports
@@ -199,10 +200,7 @@ class MainWindow(QMainWindow):
         if self._reset_pending:return
         try:
             for param,value,index,drum_set in changes:
-                if not param.minimum<=value<=param.maximum:raise ValueError(param.label+'：値が範囲外です。')
-                if not param.allowed(self.session.profile):raise ValueError('機種に対応しない項目です。')
-                if param.model==0x44 and param.high==2 and not 0<=index<16:raise ValueError('パートが範囲外です。')
-                if drum_set is not None and (not 0<=drum_set<self.session.profile.drums or not 13<=index<=91):raise ValueError('ドラムセットまたはノートが範囲外です。')
+                self.session.validate_edit(param,value,index,drum_set)
             if not force:changes=[x for x in changes if self.session.get(x[0],x[2],x[3])!=x[1]]
             if not changes:return
             # Retain a typed initial value so Undo of the first edit can send it back.
@@ -347,7 +345,9 @@ class MainWindow(QMainWindow):
                     for key,size in (previous_fields|self.session.fields).items():
                         raw=self.session.get_bytes(key[0],key[1:],size)
                         old=bytes(previous_memory.get((key[0],key[1],key[2],key[3]+i),255) for i in range(size))
-                        if raw is not None and raw!=old:messages.append(change(key[1:],raw,model=key[0]))
+                        if (raw is not None and raw!=old
+                                and supports_setup_write(self.session.profile,key[0],key[1:],size)):
+                            messages.append(change(key[1:],raw,model=key[0]))
                 self.send_messages([(0,x) for x in messages],'やり直し' if redo else '元に戻す')
             self.status(('やり直し：' if redo else '元に戻す：')+label_text)
 
@@ -375,7 +375,7 @@ class MainWindow(QMainWindow):
         self.session.checkpoint('モード変更');self.session.mode=mode;self.mark_changed()
         if mode in resets and self.engine.connected:
             self.send_messages([(0,bytes.fromhex(resets[mode]))],'モード切替',interval=.1)
-            self.read_all()
+            if self.session.profile.supports_readback:self.read_all()
         elif mode=='Performance':self.status('本体側をPerformanceモードに切り替えてください。機種固有画面から番号を呼び出せます。')
 
     def can_send(self):
@@ -424,7 +424,7 @@ class MainWindow(QMainWindow):
         if not self.engine.connected:self.status('XG RESETにはMIDI接続が必要です。');return
         if self.session.profile.native5:self.status('MU5系はXG RESETに対応していません。');return
         if not self.device_matches():self.error('選択機種と検出した本体が異なります。');return
-        if self.session.get_bytes(0x49,(0,0,3),1)==b'\x00':
+        if self.session.profile.native_system and self.session.get_bytes(0x49,(0,0,3),1)==b'\x00':
             self.error('本体のSystem On受信がOFFです。環境設定のシステムでONにしてから初期化してください。');return
         answer=QMessageBox.question(self,'XG RESET',
             '本体の音色・パート・エフェクトをXGの初期状態へ戻します。\n現在PCにある設定を退避してから実行し、本体から再取得します。\n未取得の本体設定は退避に含まれません。実行しますか？',
@@ -435,7 +435,9 @@ class MainWindow(QMainWindow):
         except Exception as exc:self.error('初期化前のPC設定を退避できないため停止しました：'+str(exc));return
         self.diagnostics.record('xg_reset_requested',model=self.session.profile.name,snapshot=str(path),known_bytes=len(self.session.memory))
         self.loop.setChecked(False);self.set_reset_busy(True)
-        self.engine.reset_xg(read_blocks(self.session.profile));self.status('XG RESET後、本体から再取得します…')
+        blocks=read_blocks(self.session.profile)
+        self.engine.reset_xg(blocks)
+        self.status('XG RESET後、本体から再取得します…' if blocks else 'XG RESETを送信中…')
 
     def on_xg_reset_applied(self):
         profile=self.session.profile.name;self.session=Session(profile);self.session.mode='XG'
@@ -544,7 +546,7 @@ class MainWindow(QMainWindow):
             used=[x for x in outs if x>=0]
             if len(used)!=len(set(used)):self.error('同じ出力をA～Dに重複して割り当てることはできません。');return
             ins=[v for v in (input_box.currentData(),keyboard.currentData()) if v>=0]
-            self.engine.device=device.value()-1;self.engine.submit('open',(ins,outs))
+            self.engine.device=device.value()-1;self.engine.submit('open',(ins,outs,self.session.profile))
 
     def on_connection(self,connected):
         self.connect_button.setText('接続解除' if connected else '接続')
@@ -552,12 +554,15 @@ class MainWindow(QMainWindow):
         if not connected:
             self.detected_name=''
             if self._reset_pending:self.set_reset_busy(False)
-        elif not self.session.memory:self.read_all()
+        elif self.session.profile.supports_readback and not self.session.memory:self.read_all()
         self.refresh_pending=True
 
     def read_addresses(self,addresses,label_text,preserve_live=False):
         if self._reset_pending:self.status('XG RESETと再取得の完了を待ってください。');return
         if not self.engine.connected:self.status('本体から取得するにはMIDI接続が必要です。');return
+        if not self.device_matches():self.error('検出した本体と選択機種が異なります。機種を確認してください。');return
+        if not self.session.profile.supports_readback:self.status('この機種はMIDIで設定を返信できません。');return
+        if not addresses:self.status('取得できる設定がありません。');return
         if self.engine.playing:self.engine.stop()
         self.engine.submit('read',(addresses,label_text));self.status(label_text+'中…')
 
@@ -567,13 +572,15 @@ class MainWindow(QMainWindow):
             SetupScope.EFFECTS:'エフェクト系のみ',
             SetupScope.DRUM_MAP:'ドラムマップデータのみ',
         }
-        choices={tr(label):scope for scope,label in labels.items() if setup_read_blocks(self.session.profile,scope)}
+        choices={tr(label):scope for scope,label in labels.items() if scope is SetupScope.ALL or not self.session.profile.native5}
         choice,accepted=QInputDialog.getItem(self,title,prompt,list(choices),0,False)
         return choices.get(choice) if accepted else None
 
     def read_from_device(self):
         if not self.engine.connected:
             self.status('本体から取得するにはMIDI接続が必要です。');return
+        if not self.session.profile.supports_readback:
+            self.status('この機種はMIDIで設定を返信できません。');return
         scope=self.choose_setup_scope('本体から取得','取得する設定の範囲を選んでください。')
         if scope is not None:
             labels={SetupScope.ALL:'全設定取得',SetupScope.EFFECTS:'エフェクト設定取得',
@@ -589,6 +596,8 @@ class MainWindow(QMainWindow):
     def send_to_device(self):
         if not self.engine.connected:self.status('本体へ送信するにはMIDI接続が必要です。');return
         if not self.device_matches():self.error('検出した本体と選択機種が異なります。機種を確認してください。');return
+        if not self.session.profile.supports_readback:
+            self.status('設定を読み戻せない機種では一括送信を利用できません。');return
         if not self.session.memory:self.status('送信する設定がありません。');return
         scope=self.choose_setup_scope('本体へ設定を送信','送信する設定の範囲を選んでください。選んだ範囲の本体設定が変更されます。')
         if scope is None:return
@@ -626,9 +635,11 @@ class MainWindow(QMainWindow):
         self.progress.setVisible(True);self.progress.setRange(0,max(1,total));self.progress.setValue(current);self.status(f'{text}  {current:,}/{total:,}')
 
     def on_finished(self,text,details):
-        if text=='XG初期化後取得':self.set_reset_busy(False)
+        if text in ('XG初期化後取得','XG初期化'):self.set_reset_busy(False)
         self.progress.setVisible(False)
-        if '取得' in text:
+        if text=='XG初期化':
+            self.status('XG RESETを送信しました。')
+        elif '取得' in text:
             self.refresh_pending=True;self.recovery_timer.start()
             missing=details.get('missing',[])
             suffix=f' / 未取得 {len(missing)}件（前回値または初期値が残ります）' if missing else ''
@@ -637,6 +648,8 @@ class MainWindow(QMainWindow):
             self.status(f'{text}：{details.get("count",0):,}ブロック取得'+suffix)
             self.log('READ SUMMARY '+json.dumps(details,ensure_ascii=False))
             if missing:self.log('UNREAD BLOCKS '+json.dumps(missing))
+        elif text=='LCD表示の送信':
+            self.status('LCD表示の送信を中断しました。' if details.get('cancelled') else 'LCD表示データを送信しました。')
         elif text=='再生完了':
             if self.loop.isChecked():self.play()
             elif self.session.profile.tg300b_catalog and self.session.mode=='TG300B' and self.keep_setup.isChecked():
@@ -644,7 +657,11 @@ class MainWindow(QMainWindow):
 
     def open_midi(self):
         path,_=QFileDialog.getOpenFileName(self,'MIDIファイルを開く',str(self.data_dir),'MIDI (*.mid *.midi)')
-        if path:self.midi_file=path;self.midi_label.setText(Path(path).name)
+        if path:self.select_midi_file(path)
+
+    def select_midi_file(self,path):
+        self.midi_file=str(path)
+        self.midi_label.setText(Path(path).name)
 
     def play(self):
         if self._reset_pending:self.status('XG RESETと再取得が終わるまでお待ちください。');return
@@ -653,7 +670,9 @@ class MainWindow(QMainWindow):
         if not self.engine.connected:self.status('再生にはMIDI接続が必要です。');return
         started=time.perf_counter()
         try:
-            schedule=load_midi(self.midi_file,self.keep_setup.isChecked(),allow_tg300b=self.session.profile.tg300b_catalog)
+            profile=self.session.profile
+            schedule=load_midi(self.midi_file,self.keep_setup.isChecked(),allow_tg300b=profile.tg300b_catalog,
+                               allow_lcd=profile.lcd and self.device_matches())
             self.diagnostics.record('midi_file_loaded',filename=Path(self.midi_file).name,size=Path(self.midi_file).stat().st_size,
                                     elapsed_ms=(time.perf_counter()-started)*1000,events=len(schedule),keep_setup=self.keep_setup.isChecked())
             needed={e[2] for e in schedule}
@@ -768,7 +787,7 @@ def main():
     if args.smoke:
         def smoke():
             try:
-                for i in range(7):window.navigate(i);app.processEvents()
+                for i in range(len(window.pages)):window.navigate(i);app.processEvents()
                 window.settings.refresh()
                 window.navigate(0);app.processEvents()
                 if args.screenshot:window.grab().save(args.screenshot)
@@ -779,21 +798,31 @@ def main():
                 format0.tracks.append(mido.MidiTrack([mido.Message('note_on',note=60,velocity=90,time=0),mido.Message('note_off',note=60,time=480)]))
                 path0=data_dir/'smoke_format0.mid';format0.save(path0)
                 assert len(load_midi(path0))==2
+                window.lcd_page.text.setText('MU EDITOR')
+                window.lcd_page.grid.replace({(0,0),(7,5),(15,15)})
+                lcd_packets=window.lcd_page.packets(True,True)
+                lcd_midi=data_dir/'smoke_lcd.mid'
+                embed_lcd_midi(path0,lcd_midi,lcd_packets)
+                assert len(load_midi(lcd_midi,False))==2
+                assert [raw for _,_,_,raw in load_midi(lcd_midi,False,allow_lcd=True)
+                        if raw[0]==0xF0]==lcd_packets
                 original_language=window.language;before_language=window.session.snapshot();queued=window.engine.commands.qsize()
                 language_views={}
                 for index,lang in ((0,'en'),(1,'ja')):
                     window.settings.language.setCurrentIndex(index);window.navigate(1);app.processEvents()
                     language_views[lang]={'menus':[a.text() for a in window.menuBar().actions()],
                         'voice_columns':[window.pages[1].grid.horizontalHeaderItem(i).text() for i in range(7)],
-                        'navigation':window.nav.item(0).text()}
+                        'navigation':window.nav.item(0).text(), 'lcd':window.nav.item(window.nav.count()-1).text()}
                 assert language_views['en']['menus']==['File','Edit','Help']
                 assert language_views['ja']['menus']==['ファイル','編集','ヘルプ']
+                assert language_views['en']['lcd']=='08  LCD editor'
+                assert language_views['ja']['lcd']=='08  LCD編集'
                 assert language_views['en']['voice_columns']==['Favorite','Program','MSB','LSB','Voice name','Category','Elements']
                 window.settings.language.setCurrentIndex(0 if original_language=='en' else 1);window.navigate(0);app.processEvents()
                 assert window.session.snapshot()==before_language and window.engine.commands.qsize()==queued
-                report={'version':__version__,'pages':7,'preferences':True,'models':len(PROFILES),'voices':len(window.catalog.data['voices']),'size':[window.width(),window.height()],
+                report={'version':__version__,'pages':len(window.pages),'preferences':True,'models':len(PROFILES),'voices':len(window.catalog.data['voices']),'size':[window.width(),window.height()],
                         'python':sys.executable,'midi_roundtrip':True,'midi_formats_checked':[0,1],
-                        'theme':window.theme,'language':window.language,'voice_label':window.voice_name(0),'language_views':language_views,
+                        'lcd_midi_roundtrip':True,'theme':window.theme,'language':window.language,'voice_label':window.voice_name(0),'language_views':language_views,
                         'language_switch_preserves_session_and_midi':True}
                 atomic_write(data_dir/'smoke.json',json.dumps(report,indent=2).encode('utf-8'))
                 window.close();app.quit()

@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 from PySide6.QtCore import Qt,QPointF,QEvent
 from PySide6.QtGui import QMouseEvent,QPalette
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication,QMessageBox
 from kp_mu_editor.app import MainWindow,configure_application
 from kp_mu_editor.schema import PART_BY_KEY,PROFILES,DRUM,Param
@@ -80,13 +81,60 @@ class RevisionGui(unittest.TestCase):
             read_all.assert_called_once_with()
 
     def test_preferences_and_prominent_master_fields(self):
-        w=self.w;self.assertEqual(w.nav.count(),7);self.assertFalse(hasattr(w,'live'))
+        w=self.w;self.assertEqual(w.nav.count(),8);self.assertFalse(hasattr(w,'live'))
         self.assertEqual(set(w.master.controls),{'master_volume','transpose','master_tune'})
         w.master.controls['master_volume'].setValue(101)
         self.assertEqual(self.packets()[-1].address,(0,0,4));self.assertEqual(self.packets()[-1].data,bytes([101]))
         w.open_preferences();self.application.processEvents();self.assertTrue(w.preferences_dialog.isVisible())
         self.assertNotIn('master_volume',w.settings.system.controls)
         w.panic_button.click();self.assertTrue(w.engine.stopped)
+
+    def test_lcd_edit_send_embed_and_play_use_the_current_device(self):
+        import mido
+        w = self.w
+        page = w.lcd_page
+        w.navigate(w.nav.count() - 1)
+        page.text.setText('MU TEST')
+        QTest.mouseClick(page.grid, Qt.MouseButton.LeftButton, pos=page.grid.rect().center())
+        self.assertEqual(len(page.grid.pixels), 1)
+        self.assertFalse(page.send_both.isEnabled())
+        self.assertTrue(page.embed_button.isEnabled())
+        page.send_both.click()
+        self.assertEqual(w.engine.sent, [])
+
+        w.session = Session('MU80')
+        w.detected_name = 'MU80'
+        w.engine.device = 4
+        page.refresh()
+        self.assertTrue(page.send_both.isEnabled())
+        w.detected_name = 'MU100'
+        page.refresh()
+        self.assertFalse(page.send_both.isEnabled())
+        w.detected_name = 'MU80'
+        page.refresh()
+        page.send_both.click()
+        self.assertEqual([p.address for p in self.packets()], [(6,0,0), (7,0,0)])
+        self.assertTrue(all(port == 0 and raw[2] == 0x14 for port, raw in w.engine.sent))
+
+        source = Path(self.temp.name) / 'song.mid'
+        destination = Path(self.temp.name) / 'song-LCD.mid'
+        midi = mido.MidiFile(type=0)
+        midi.tracks.append(mido.MidiTrack([mido.Message('note_on', note=60)]))
+        midi.save(source)
+        with (patch('kp_mu_editor.lcd_page.QFileDialog.getOpenFileName', return_value=(str(source), '')),
+              patch('kp_mu_editor.lcd_page.QFileDialog.getSaveFileName', return_value=(str(destination), ''))):
+            page.embed_button.click()
+        self.assertEqual(w.midi_file, str(destination))
+        self.assertFalse(w.keep_setup.isChecked())
+        w.play()
+        kind, schedule = w.engine.commands[-1]
+        self.assertEqual(kind, 'play')
+        self.assertEqual([raw for _,_,_,raw in schedule if raw[0] == 0xF0],
+                         [raw for _,raw in w.engine.sent])
+        w.session = Session('MU500')
+        w.detected_name = 'MU500'
+        w.play()
+        self.assertEqual([raw for _,_,_,raw in w.engine.commands[-1][1]], [bytes.fromhex('90 3C 40')])
 
     def test_native_basic_changes_are_sent_and_do_not_echo(self):
         w=self.w;self.assertEqual(w.voice_map.currentData(),1)

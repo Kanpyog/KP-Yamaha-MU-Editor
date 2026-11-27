@@ -3,11 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from datetime import datetime
 import heapq,json,queue,threading,time,itertools,traceback
-from io import BytesIO
 from PySide6.QtCore import QObject, Signal
 from .winmm import Transport
 from .protocol import parse, request, is_setup_packet, TG300B_SYSTEM_ON
-from .smf import read_smf
+from .smf import load_smf_file
+from .lcd import is_lcd_packet
 from .schema import CC_PART
 from .catalog import Catalog
 from .read_trace import ReadTrace
@@ -298,11 +298,13 @@ class Engine(QObject):
                               queue_wait_ms=(command_started-command[2])*1000 if len(command)>2 else None)
                 if kind=='open':
                     if self.transport:self.transport.close()
-                    self.transport=Transport(diagnostics=self.diagnostics);self.transport.open(*payload)
-                    self.diagnose('midi_connected',inputs=list(payload[0]),outputs=list(payload[1]),device=self.device)
+                    inputs,outputs,*selection=payload
+                    self.transport=Transport(diagnostics=self.diagnostics);self.transport.open(inputs,outputs)
+                    self.diagnose('midi_connected',inputs=list(inputs),outputs=list(outputs),device=self.device)
                     self.connected=True;self.connection.emit(True)
-                    self._send(bytes.fromhex('F0 7E 7F 06 01 F7'))
-                    self._send(request((1,0,0)))
+                    profile=selection[0] if selection else None
+                    if profile is None or (profile.supports_readback and not profile.native5):
+                        self._send(request((1,0,0)))
                 elif kind=='close':
                     self.diagnose('midi_disconnected')
                     self.playing=False;self.schedule.clear()
@@ -318,8 +320,11 @@ class Engine(QObject):
                     self.playing=False;self.schedule.clear();self.cancel.clear();self._panic()
                     self._send(bytes.fromhex('F0 43 10 4C 00 00 7E 00 F7'))
                     self.effect_types.clear();self.reset_applied.emit();self.diagnose('xg_reset_sent')
-                    self.cancel.wait(.1)
-                    self._read(payload,'XG初期化後取得',clear_cancel=False)
+                    if payload:
+                        self.cancel.wait(.1)
+                        self._read(payload,'XG初期化後取得',clear_cancel=False)
+                    else:
+                        self.finished.emit('XG初期化',{})
                 elif kind=='send':
                     self._send_batch(*payload)
                 elif kind=='send_set':
@@ -349,11 +354,9 @@ class Engine(QObject):
         if self._thread:self._thread.join(timeout=4)
 
 
-def load_midi(path,keep_setup=True,*,allow_tg300b=False):
+def load_midi(path,keep_setup=True,*,allow_tg300b=False,allow_lcd=False):
     mido=midi_library()
-    from mido.messages.specs import SPEC_BY_STATUS
-    lengths = {status: spec['length'] for status, spec in SPEC_BY_STATUS.items()}
-    file = mido.MidiFile(file=BytesIO(read_smf(path, lengths)))
+    file=load_smf_file(path)
     events=[];order=0
     for track in file.tracks:
         tick=0;port=0
@@ -366,14 +369,21 @@ def load_midi(path,keep_setup=True,*,allow_tg300b=False):
             elif not msg.is_meta:
                 raw=bytes(msg.bytes())
                 if msg.type=='sysex':
-                    if not keep_setup:continue
-                    standard=raw in (bytes.fromhex('F0 7E 7F 09 01 F7'),bytes.fromhex('F0 7E 7F 09 03 F7'))
-                    packet = parse(raw) if len(raw) > 7 and raw[1] == 0x43 and raw[3] in (0x4C, 0x49, 0x44) else None
-                    xg_reset = (packet is not None and packet.model == 0x4C
-                                and not packet.bulk and packet.address == (0, 0, 0x7E)
-                                and packet.data == b'\x00')
-                    gs_reset=allow_tg300b and raw==TG300B_SYSTEM_ON
-                    if not (standard or xg_reset or gs_reset or is_setup_packet(packet)):continue
+                    if not keep_setup and not allow_lcd:continue
+                    yamaha = len(raw) > 7 and raw[1] == 0x43 and raw[3] in (0x4C, 0x49, 0x44)
+                    display = (yamaha and raw[2] & 0xF0 == 0x10 and raw[3] == 0x4C
+                               and raw[4] in (0x06, 0x07))
+                    if display:
+                        if not allow_lcd or not is_lcd_packet(parse(raw)):continue
+                    else:
+                        if not keep_setup:continue
+                        standard=raw in (bytes.fromhex('F0 7E 7F 09 01 F7'),bytes.fromhex('F0 7E 7F 09 03 F7'))
+                        packet=parse(raw) if yamaha else None
+                        xg_reset = (packet is not None and packet.model == 0x4C
+                                    and not packet.bulk and packet.address == (0, 0, 0x7E)
+                                    and packet.data == b'\x00')
+                        gs_reset=allow_tg300b and raw==TG300B_SYSTEM_ON
+                        if not (standard or xg_reset or gs_reset or is_setup_packet(packet)):continue
                 if not keep_setup and (msg.type=='program_change' or (msg.type=='control_change' and msg.control in (0,32,5,6,38,7,10,65,71,72,73,74,75,76,77,78,84,91,93,94,96,97,98,99,100,101))):continue
                 events.append((tick,order,port,raw))
             order+=1

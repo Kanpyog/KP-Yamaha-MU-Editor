@@ -2,6 +2,8 @@
 from dataclasses import dataclass, replace
 from enum import Enum
 
+from .protocol import is_setup_write
+
 
 @dataclass(frozen=True)
 class Profile:
@@ -13,13 +15,22 @@ class Profile:
     generation: int
     eq: bool = False
     hpf: bool = False
-    ad: bool = False
+    ad_parts: int = 0
     plg: int = 0
     performance: bool = False
     ex: bool = False
     native5: bool = False
     unsupported: bool = False
     tg300b_catalog: bool = False
+    lcd: bool = False
+    supports_readback: bool = True
+    native_system: bool = True
+    bulk_interval: bool = True
+    drum_note_end: int = 92
+
+    @property
+    def ad(self):
+        return self.ad_parts > 0
 
     @property
     def modes(self):
@@ -39,19 +50,21 @@ def family(names, *args, **kwargs):
     for name in names.split('|'):
         PROFILES[name] = Profile(name, *args, **kwargs)
 
-family('MU5|MU5K',16,28,0,0,0,native5=True)
-family('MU10|MU15',16,32,0,2,1)
-family('MU50',16,32,0,2,1,performance=True)
-family('MU80',32,64,1,2,2,eq=True,ad=True,performance=True)
-family('MU90|MU90R',32,64,2,4,3,eq=True,hpf=True,ad=True,performance=True)
-family('MU90B',32,64,2,4,3,eq=True,hpf=True,ad=True)
-family('MU100',32,64,2,4,4,eq=True,hpf=True,ad=True,plg=1,performance=True)
-family('MU100B|MU100Bs',32,64,2,4,4,eq=True,hpf=True,ad=True,plg=1)
-family('MU100R',32,64,2,4,4,eq=True,hpf=True,ad=True,plg=2,performance=True)
-family('MU128|MU128 V2',64,128,2,4,4,eq=True,hpf=True,ad=True,plg=3,performance=True)
+# The MU10 MIDI OUT relays host data. The MU15 can reply to XG requests.
+family('MU5|MU5K',16,28,0,0,0,native5=True,native_system=False)
+family('MU10',16,32,0,2,1,ad_parts=1,supports_readback=False,native_system=False)
+family('MU15',16,32,0,2,1,lcd=True,native_system=False)
+family('MU50',16,32,0,2,1,performance=True,lcd=True,drum_note_end=85)
+family('MU80',32,64,1,4,2,eq=True,ad_parts=2,performance=True,lcd=True)
+family('MU90|MU90R',32,64,2,4,3,eq=True,hpf=True,ad_parts=2,performance=True,lcd=True)
+family('MU90B',32,64,2,4,3,eq=True,hpf=True,ad_parts=2)
+family('MU100',32,64,2,4,4,eq=True,hpf=True,ad_parts=2,plg=1,performance=True,lcd=True)
+family('MU100B|MU100Bs',32,64,2,4,4,eq=True,hpf=True,ad_parts=2,plg=1,bulk_interval=False)
+family('MU100R',32,64,2,4,4,eq=True,hpf=True,ad_parts=2,plg=2,performance=True,lcd=True)
+family('MU128|MU128 V2',64,128,2,4,4,eq=True,hpf=True,ad_parts=2,plg=3,performance=True,lcd=True)
 family('MU500',64,64,2,4,5,eq=True,hpf=True,tg300b_catalog=True)
-family('MU1000|MU2000',64,128,4,4,5,eq=True,hpf=True,ad=True,plg=3,performance=True,unsupported=True)
-family('MU1000 EX|MU1000 EX R1|MU2000 EX|MU2000 EX R1',64,128,4,4,5,eq=True,hpf=True,ad=True,plg=3,performance=True,ex=True,unsupported=True)
+family('MU1000|MU2000',64,128,4,4,5,eq=True,hpf=True,ad_parts=2,plg=3,performance=True,unsupported=True,lcd=True)
+family('MU1000 EX|MU1000 EX R1|MU2000 EX|MU2000 EX R1',64,128,4,4,5,eq=True,hpf=True,ad_parts=2,plg=3,performance=True,ex=True,unsupported=True,lcd=True)
 
 
 @dataclass(frozen=True)
@@ -198,17 +211,77 @@ DRUM = [
  p('vel_filter','Velocity → LPF',0x61,'感度',minimum=48,maximum=80,offset=64,feature='hpf')]
 
 
+def supports_setup_write(profile, model, address, size, *, bulk=False):
+    """Check model-specific limits for editor setup messages."""
+    if not is_setup_write(model, address, size):
+        return False
+    if profile.native5:
+        return model == 0x44
+    if model == 0x44:
+        return False
+
+    high, middle, low = address
+    end = low + size
+    if model == 0x49:
+        if profile.name == 'MU10':
+            # Table 2-2 lists only MIDI OUT port at 09 in the 00 00 page.
+            return not bulk and low == 9 and size == 1
+        if not profile.native_system:
+            return False
+        if bulk and low == 0:
+            # Reserved bytes are part of the documented native system dump.
+            return end <= 0x0a
+        if size != 1:
+            return False
+        if low == 1:
+            return profile.ad
+        if low == 2:
+            return profile.eq
+        if low == 5:
+            return profile.bulk_interval
+        if 6 <= low <= 8:
+            return profile.performance or profile.generation == 3
+        if low == 0x10:
+            return profile.generation == 3 or (profile.generation >= 4 and profile.performance)
+        if low == 0x11:
+            return profile.name in ('MU90R', 'MU100R') or profile.insertions == 4
+        if low == 0x12:
+            return profile.generation >= 4
+        return low in (0, 3, 4, 9)
+
+    if high == 0:
+        return bulk or profile.generation != 1 or not low <= 5 < end
+    if high == 2:
+        return middle == 1 or profile.eq
+    if high == 3:
+        return middle < profile.insertions and (profile.generation >= 3 or end <= 0x26)
+    if high == 8:
+        return middle < profile.parts and (profile.part_eq or end <= 0x6f)
+    if high == 0x0a:
+        return middle < profile.parts and profile.hpf
+    if high == 0x10:
+        return middle < profile.ad_parts
+    if 0x30 <= high <= 0x33:
+        return (high < 0x30 + profile.drums and middle < profile.drum_note_end
+                and (profile.part_eq or end <= 0x10))
+    return high == 0x70 and middle < profile.plg
+
+
 def read_blocks(profile, include_drums=True):
+    if not profile.supports_readback:
+        return []
     if profile.native5:
         return [(0x44,(0,0,0)), *((0x44,(2,n,0)) for n in range(16))]
-    result=[(0x4c,(0,0,0)),(0x4c,(1,0,0)),(0x49,(0,0,0))]
+    result=[(0x4c,(0,0,0)),(0x4c,(1,0,0))]
+    if profile.native_system:
+        result.append((0x49,(0,0,0)))
     if profile.generation>=4:
         result.append((0x49,(0,0,0x12)))
     result += [(0x4c,(2,1,x)) for x in (0,0x10,0x20,0x30,0x40,0x70)]
     if profile.eq:
         result.append((0x4c,(2,0x40,0)))
     result += [(0x4c,(3,n,x)) for n in range(profile.insertions) for x in (0,0x20)]
-    # MU1000/2000 expose 14-bit insertion parameters in an extra block.
+    # MU90 and later include 14-bit insertion parameters for some effect types.
     if profile.generation>=3:
         result += [(0x4c,(3,n,0x30+2*i),True) for n in range(profile.insertions) for i in range(10)]
     result += [(0x4c,(8,n,x)) for n in range(profile.parts) for x in (0,0x30)]
@@ -216,12 +289,11 @@ def read_blocks(profile, include_drums=True):
         result += [(0x4c,(8,n,x)) for n in range(profile.parts) for x in (0x70,0x74)]
     if profile.hpf:
         result += [(0x4c,(0x0a,n,0x20)) for n in range(profile.parts)]
-    if profile.ad:
-        result += [(0x4c,(0x10,n,0)) for n in range(2)]
+    result += [(0x4c,(0x10,n,0)) for n in range(profile.ad_parts)]
     if include_drums:
         lows = (0, *((0x20,) if profile.part_eq else ()), *((0x50,0x60) if profile.hpf else ()))
         result += [(0x4c,(0x30+n,note,x)) for n in range(profile.drums)
-                   for note in range(13,92 if profile.generation>=3 else 85) for x in lows]
+                   for note in range(13,profile.drum_note_end) for x in lows]
     return result
 
 
@@ -244,8 +316,7 @@ def effect_part_addresses(profile):
         return []
     part_offsets = sorted(_part_effect_offsets(profile))
     addresses = [(8,part,low) for part in range(profile.parts) for low in part_offsets]
-    if profile.ad:
-        addresses += [(0x10,part,low) for part in range(2) for low in sorted(_EFFECT_SEND_OFFSETS)]
+    addresses += [(0x10,part,low) for part in range(profile.ad_parts) for low in sorted(_EFFECT_SEND_OFFSETS)]
     return addresses
 
 
@@ -256,8 +327,7 @@ def in_setup_scope(profile, scope, model, address, size):
         return False
     high, middle, low = address
     if scope is SetupScope.DRUM_MAP:
-        note_end = 92 if profile.generation >= 3 else 85
-        return 0x30 <= high < 0x30+profile.drums and 13 <= middle < note_end
+        return 0x30 <= high < 0x30+profile.drums and 13 <= middle < profile.drum_note_end
     if scope is SetupScope.EFFECTS:
         if high == 2:
             return middle == 1 or (middle == 0x40 and profile.eq)
@@ -265,7 +335,7 @@ def in_setup_scope(profile, scope, model, address, size):
             return 0 <= middle < profile.insertions
         if high == 8 and 0 <= middle < profile.parts:
             offsets = _part_effect_offsets(profile)
-        elif high == 0x10 and profile.ad and 0 <= middle < 2:
+        elif high == 0x10 and 0 <= middle < profile.ad_parts:
             offsets = _EFFECT_SEND_OFFSETS
         else:
             return False
@@ -276,6 +346,8 @@ def in_setup_scope(profile, scope, model, address, size):
 def setup_read_blocks(profile, scope):
     if not isinstance(scope, SetupScope):
         raise ValueError('Invalid setup scope')
+    if not profile.supports_readback:
+        return []
     blocks = read_blocks(profile, include_drums=scope is not SetupScope.EFFECTS)
     if scope is SetupScope.ALL:
         return blocks

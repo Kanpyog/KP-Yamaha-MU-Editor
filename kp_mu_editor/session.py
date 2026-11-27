@@ -6,8 +6,9 @@ import os
 from tempfile import NamedTemporaryFile
 from functools import lru_cache
 from datetime import datetime
-from .protocol import parse, change, bulk, encode, decode, split_sysex, is_setup_write, is_setup_packet
-from .schema import PROFILES, SetupScope, effect_part_addresses, in_setup_scope, part_params, read_blocks
+from .protocol import parse, change, bulk, encode, decode, split_sysex, is_setup_packet
+from .schema import PROFILES, DRUM, SetupScope, effect_part_addresses, in_setup_scope, part_params, supports_setup_write
+from .lcd import is_lcd_packet
 from . import __version__
 
 FORMAT = 'KP_YAMAHA_MUeditor/session/1'
@@ -129,10 +130,23 @@ class Session:
             if dirty:self.dirty.add(key)
         if dirty:self.fields[(model,*address)]=len(data)
 
+    def validate_edit(self, param, value, index, drum_set):
+        if not param.minimum <= value <= param.maximum:
+            raise ValueError(f'{param.label}：値が範囲外です。')
+        if param.model == 0x44 and param.high == 2 and not 0 <= index < 16:
+            raise ValueError('パートが範囲外です。')
+        if drum_set is None:
+            address = param.address(index)
+        else:
+            if not (0 <= drum_set < self.profile.drums and 13 <= index < self.profile.drum_note_end):
+                raise ValueError('ドラムセットまたはノートが範囲外です。')
+            address = (0x30 + drum_set, index, param.low)
+        if not param.allowed(self.profile) or not supports_setup_write(self.profile, param.model, address, param.size):
+            raise ValueError('機種に対応しない項目です。')
+        return address
+
     def set(self,param,value,index=0,drum_set=None,origin='編集済み'):
-        if not param.minimum<=value<=param.maximum:raise ValueError(f'{param.label}: 範囲外です。')
-        if not param.allowed(self.profile):raise ValueError('この機種にはないパラメーターです。')
-        addr=param.address(index) if drum_set is None else (0x30+drum_set,index,param.low)
+        addr=self.validate_edit(param,value,index,drum_set)
         raw=encode(value,param.size,param.nibble)
         self.put(param.model,addr,raw,origin)
         return change(addr,raw,model=param.model)
@@ -140,7 +154,12 @@ class Session:
     def receive(self, raw, origin='本体から取得'):
         packet=parse(raw)
         if packet is None:return None
-        if packet.model not in (0x4c,0x49,0x44):return None
+        if packet.model not in (0x4c,0x49,0x44) or is_lcd_packet(packet):return None
+        if not packet.bulk and is_setup_packet(packet) and not supports_setup_write(
+                self.profile,packet.model,packet.address,len(packet.data)):
+            # An unsupported individual change must not alter a reserved byte
+            # in a valid dump that may later be restored to the device.
+            return None
         self.put(packet.model,packet.address,packet.data,origin,False)
         for i in range(len(packet.data)):
             self.dirty.discard((packet.model,packet.address[0],packet.address[1],packet.address[2]+i))
@@ -172,14 +191,13 @@ class Session:
 
     def export_messages(self,scope=SetupScope.ALL):
         """Part mode/program blocks precede drum data, which PC can reset."""
-        allowed_models=(0x44,) if self.profile.native5 else (0x4c,0x49)
         if not isinstance(scope,SetupScope):
             raise ValueError('Invalid setup scope')
         keys=sorted(self.memory)
         covered=set(); messages=[]
 
-        def included(model, address, size):
-            return (model in allowed_models and is_setup_write(model,address,size)
+        def included(model, address, size, *, bulk=False):
+            return (supports_setup_write(self.profile,model,address,size,bulk=bulk)
                     and in_setup_scope(self.profile,scope,model,address,size))
 
         def priority(item):
@@ -189,7 +207,7 @@ class Session:
             return (4 if h>=0x30 and model==0x4c else (0 if h in (0,2,3) else 2),model,h,m,low)
         for model,h,m,l in sorted(self.blocks,key=priority):
             size=self.blocks[(model,h,m,l)]
-            if not included(model,(h,m,l),size):continue
+            if not included(model,(h,m,l),size,bulk=True):continue
             raw=self.get_bytes(model,(h,m,l),size)
             if raw is None:continue
             messages.append(bulk((h,m,l),raw,model=model))
@@ -201,9 +219,8 @@ class Session:
             specs += [(0x4c,address,1) for address in effect_part_addresses(self.profile)]
         for n in range(self.profile.parts):
             specs += [(x.model,x.address(n),x.size) for x in part_params(self.profile)]
-        from .schema import DRUM
         specs += [(0x4c,(0x30+s,n,x.low),x.size) for s in range(self.profile.drums)
-                  for n in range(13,92) for x in DRUM if x.allowed(self.profile)]
+                  for n in range(13,self.profile.drum_note_end) for x in DRUM if x.allowed(self.profile)]
         for model,addr,size in sorted(specs,key=lambda x:priority((x[0],*x[1]))):
             if not included(model,addr,size):continue
             fieldkeys=[(model,*addr[:2],addr[2]+i) for i in range(size)]
@@ -215,7 +232,7 @@ class Session:
         for key in keys:
             if key in covered:continue
             model,h,m,l=key
-            if model not in allowed_models or (model==0x4c and h not in (0,2,3)):continue
+            if model==0x4c and h not in (0,2,3):continue
             if not included(model,(h,m,l),1):continue
             messages.append(change((h,m,l),[self.memory[key]],model=model))
         return messages

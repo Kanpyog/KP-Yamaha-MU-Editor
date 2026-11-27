@@ -6,7 +6,7 @@ from PySide6.QtCore import QCoreApplication,QEvent
 from PySide6.QtWidgets import QApplication,QMessageBox
 from kp_mu_editor.app import MainWindow
 from kp_mu_editor.session import Session
-from kp_mu_editor.schema import PART_BY_KEY
+from kp_mu_editor.schema import PART_BY_KEY, SetupScope, read_blocks
 from kp_mu_editor.protocol import change
 
 
@@ -46,6 +46,42 @@ class ResetUiTests(unittest.TestCase):
         w.on_received(change((8,0,11),[100]));w.on_finished('XG初期化後取得',{'count':1,'expected':1,'elapsed_s':.1})
         self.assertEqual(w.session.get(PART_BY_KEY['volume'],0),100);self.assertFalse(w._reset_pending)
         self.assertTrue(w.model.isEnabled());self.assertTrue(all(a.isEnabled() for a in w.reset_sensitive_actions))
+
+    def test_mu10_skips_readback_at_connect_and_after_reset(self):
+        w=self.w;w.session=Session('MU10');w.detected_name=''
+        with patch.object(w.engine,'submit') as submit:
+            w.on_connection(True);w.read_from_device();w.read_part();w.send_to_device()
+            submit.assert_not_called()
+        with patch('kp_mu_editor.app.QMessageBox.question',return_value=QMessageBox.StandardButton.Yes),patch.object(w.engine,'reset_xg') as reset:
+            w.xg_reset()
+            reset.assert_called_once_with([])
+        w.on_xg_reset_applied();w.on_finished('XG初期化',{})
+        self.assertFalse(w._reset_pending)
+        self.assertIn('XG RESETを送信しました',w.statusBar().currentMessage())
+
+    def test_mu15_read_and_reset_share_the_xg_only_plan(self):
+        w=self.w;w.session=Session('MU15');w.detected_name='MU15'
+        expected=read_blocks(w.session.profile)
+        with patch.object(w,'choose_setup_scope',return_value=SetupScope.ALL),patch.object(w.engine,'submit') as submit:
+            w.read_from_device()
+            submit.assert_called_once_with('read',(expected,'全設定取得'))
+        with patch('kp_mu_editor.app.QMessageBox.question',return_value=QMessageBox.StandardButton.Yes),patch.object(w.engine,'reset_xg') as reset:
+            w.xg_reset()
+            reset.assert_called_once_with(expected)
+        self.assertTrue(expected)
+        self.assertTrue(all(model==0x4c for model,_ in expected))
+
+    def test_system_panel_hides_settings_absent_from_the_selected_model(self):
+        w=self.w
+        for model,expected in (
+            ('MU10',set()), ('MU15',set()),
+            ('MU50',{'mute_lock','receive_reset','receive_bank','bulk_interval'}),
+            ('MU100B',{'mute_lock','eq_lock','receive_reset','receive_bank'}),
+        ):
+            with self.subTest(model=model):
+                w.session=Session(model)
+                w.settings.refresh()
+                self.assertEqual(set(w.settings.system.controls),expected)
 
     def test_backup_failure_stops_reset(self):
         with patch('kp_mu_editor.app.QMessageBox.question',return_value=QMessageBox.StandardButton.Yes),patch.object(self.w.session,'save',side_effect=OSError('disk full')),patch.object(self.w.engine,'reset_xg') as call:

@@ -31,6 +31,7 @@ This is a standalone MIDI editor and controller for operating Yamaha's “MU Ser
 - Edit insertion effects, Multi EQ, and per-note drum settings.
 - Find voices by name or `Program-MSB-LSB`, layer parts, audition sounds on the keyboard, and play SMF files.
 - Read and send device settings, save MU sets, SysEx, and SMF Format 1 files, and copy the last SysEx message sent.
+- Edit and send LCD text and 16×16 bitmaps, and embed them in MIDI files (model support based on documentation and untested on hardware).
 - Switch between Japanese and English and between light and dark themes.
 
 ## Getting started

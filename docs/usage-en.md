@@ -35,6 +35,14 @@ After confirmation, **XG RESET** backs up the settings held on the PC, returns t
 
 Use **MIDI file** at the bottom to select an SMF Format 0 or 1 file and play it through the connected MU. Enable **Use song voices/settings** to send supported Bank Select, Program Change, and setup SysEx messages as well. A song containing an initialization message may change device settings.
 
+## LCD editor
+
+Use **08 LCD editor** to enter up to 32 printable ASCII characters and edit a 16×16 bitmap. Click to toggle a pixel, or drag to draw or erase. Select a supported model and connect MIDI output A to send text, the bitmap, or both. Check the display on the unit's Play screen.
+
+Use **Embed in MIDI** to choose an SMF Format 0 or 1 file. The editor saves a copy with display SysEx near the first sounding note and allows time for any initialization messages at the start. The saved file is selected in the player at the bottom. On supported models, playback sends the LCD messages in the song regardless of the **Use song voices/settings** option.
+
+LCD support is based on Yamaha's documentation. The display has not been tested on hardware. [Model compatibility and hardware testing](compatibility-en.md#lcd-display)
+
 ## Display and troubleshooting
 
 On first launch, the editor uses Japanese and the dark theme. Change the language under **編集 (Edit) → 環境設定 (Preferences) → Language**. Use the top bar to switch themes.

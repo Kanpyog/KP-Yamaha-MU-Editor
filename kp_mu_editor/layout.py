@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QComboBox,QListWi
 from .schema import PROFILES
 from .widgets import button,label,InlineParams,DragSpinBox
 from .pages import Mixer,Voices,Parts,Drums,Effects,Layers,Library,Settings
+from .lcd_page import LCDPage
 from . import __version__
 from .theme import style_widget
 from .i18n import QAction,QMenu,QComboBox,QListWidget,QCheckBox,QPushButton,QDialog,QLineEdit
@@ -72,10 +73,11 @@ def build_window(a):
     state_row.addStretch();a.validation=label('MU500：実機検証基準','font-size:11px;color:@muted@;');a.validation.setWordWrap(False);state_row.addWidget(a.validation);layout.addWidget(state)
 
     body=QSplitter();navpanel=QWidget();navpanel.setObjectName('navigationPanel');nl=QVBoxLayout(navpanel);nl.setContentsMargins(0,0,0,12)
-    a.nav=QListWidget();a.nav.setObjectName('navigation');a.nav.addItems(['01  ミキサー','02  音色','03  パート編集','04  ドラム','05  エフェクト','06  レイヤー','07  ライブラリー'])
+    a.nav=QListWidget();a.nav.setObjectName('navigation');a.nav.addItems(['01  ミキサー','02  音色','03  パート編集','04  ドラム','05  エフェクト','06  レイヤー','07  ライブラリー','08  LCD編集'])
     a.nav.setCurrentRow(0);nl.addWidget(a.nav);nl.addWidget(label(f'   MU EDITOR\n   {__version__}  ·  Windows','color:@nav_muted@;font-size:11px;'))
     navpanel.setMinimumWidth(175);navpanel.setMaximumWidth(205);body.addWidget(navpanel)
-    a.stack=QStackedWidget();a.pages=[Mixer(a),Voices(a),Parts(a),Drums(a),Effects(a),Layers(a),Library(a)]
+    a.stack=QStackedWidget();a.lcd_page=LCDPage(a)
+    a.pages=[Mixer(a),Voices(a),Parts(a),Drums(a),Effects(a),Layers(a),Library(a),a.lcd_page]
     for page in a.pages:a.stack.addWidget(page)
     body.addWidget(a.stack);body.setStretchFactor(1,1);a.nav.currentRowChanged.connect(a.navigate);layout.addWidget(body,1)
 

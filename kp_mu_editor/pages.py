@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QLineEdit,
 from .widgets import page,button,label,table,NumericDelegate,ParamTabs,ToneGraph,DragSpinBox as QSpinBox,style_cell,value_style,ask_number
 from .mixer import Mixer
 from .effects import Effects
-from .schema import PART_BY_KEY,part_params,DRUM,Param,CC_CONTROLS,PROFILES,CC_PART
+from .schema import PART_BY_KEY,part_params,DRUM,Param,CC_CONTROLS,PROFILES,CC_PART,read_blocks,supports_setup_write
 from .protocol import change,decode,encode,cc,rpn
 from .catalog import CATEGORIES
 from .engine import load_midi,write_midi
@@ -149,7 +149,7 @@ class Drums(QWidget):
             self.setup.blockSignals(True);self.setup.clear();self.setup.addItems([f'Drum Setup {n+1}' for n in range(p.drums)]);self.setup.blockSignals(False)
             self.params=[x for x in DRUM if x.allowed(p)]
             self.grid.setColumnCount(2+len(self.params));self.grid.setHorizontalHeaderLabels(['Note','楽器名（標準キット参考）']+[x.label for x in self.params])
-            self.grid.setRowCount((79 if p.generation>=3 else 72) if p.drums else 0);self.grid.setColumnWidth(0,65);self.grid.setColumnWidth(1,200)
+            self.grid.setRowCount(p.drum_note_end-13 if p.drums else 0);self.grid.setColumnWidth(0,65);self.grid.setColumnWidth(1,200)
             for i in range(2,self.grid.columnCount()):self.grid.setColumnWidth(i,100)
             self.signature=p.name
         setup=max(0,self.setup.currentIndex())
@@ -446,18 +446,21 @@ class Settings(QWidget):
         self.refresh_diagnostics()
         self.connection_info.setText(f'{p.name}  ·  {"接続中" if a.engine.connected else "オフライン"}\n検出した本体：{a.detected_name or "未検出"}\n設定保存先：{a.data_dir}')
         if self.model_signature!=p.name:
-            high=0;model=0x44 if p.native5 else 0x4c
-            params=[]
-            if not p.native5:
-                for key,title,low in [('mute_lock','Mute Lock',0),('eq_lock','EQ Lock',2),('receive_reset','System On受信',3),('receive_bank','Bank Select受信',4)]:params.append(Param(key,title,low,'MU固有',maximum=1,default=1 if low in (3,4) else 0,high=0,model=0x49,choices=('OFF','ON')))
-                params.append(Param('bulk_interval','Bulk間隔 0=50 / 1=100 / 2=150 / 3=200 / 4=300ms',5,'MU固有',maximum=4,default=2,high=0,model=0x49))
-            self.system.build(params)
+            params=[Param(key,title,low,'MU固有',maximum=1,default=1 if low in (3,4) else 0,high=0,model=0x49,choices=('OFF','ON'))
+                    for key,title,low in [('mute_lock','Mute Lock',0),('eq_lock','EQ Lock',2),
+                                          ('receive_reset','System On受信',3),('receive_bank','Bank Select受信',4)]]
+            params.append(Param('bulk_interval','Bulk間隔 0=50 / 1=100 / 2=150 / 3=200 / 4=300ms',5,'MU固有',maximum=4,default=2,high=0,model=0x49))
+            self.system.build([param for param in params if supports_setup_write(p,param.model,param.address(),param.size)])
             adparams=[Param('ad_gain','Input Gain 0=Mic / 1=Line',0,'A/D',maximum=1,default=0,high=0x10),
                 Param('ad_bank_msb','Bank MSB',1,'A/D',default=0,high=0x10),Param('ad_bank_lsb','Bank LSB',2,'A/D',default=0,high=0x10),
                 Param('ad_program','Program',3,'A/D',default=0,offset=-1,high=0x10),
                 Param('ad_volume','Volume',0x0b,'A/D',default=0,high=0x10),Param('ad_pan','Pan',0x0e,'A/D',minimum=1,high=0x10),
                 Param('ad_dry','Dry',0x11,'A/D',default=127,high=0x10),Param('ad_chorus','Chorus',0x12,'A/D',default=0,high=0x10),
                 Param('ad_reverb','Reverb',0x13,'A/D',default=40,high=0x10),Param('ad_variation','Variation',0x14,'A/D',default=0,high=0x10)]
+            self.extension_part.blockSignals(True)
+            self.extension_part.setMaximum(max(1,p.ad_parts))
+            self.extension_part.setEnabled(p.ad_parts>1)
+            self.extension_part.blockSignals(False)
             self.extension_form.build(adparams if p.ad else []);self.model_signature=p.name
         self.system.refresh(s,0);self.refresh_extension();self.refresh_controls()
 
@@ -476,7 +479,8 @@ class Settings(QWidget):
         if p.ad:self.extension_form.refresh(self.app.session,self.extension_part.value()-1)
 
     def read_extension(self):
-        if self.app.session.profile.ad:self.app.read_addresses([(0x4c,(0x10,n,0)) for n in range(2)],'A/D取得')
+        profile=self.app.session.profile
+        if profile.ad:self.app.read_addresses([block for block in read_blocks(profile,False) if block[1][0]==0x10],'A/D取得')
 
     def performance(self):
         if not self.app.session.profile.performance:self.app.status('この機種には本体Performanceモードがありません。');return

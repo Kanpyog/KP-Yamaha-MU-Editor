@@ -13,11 +13,19 @@
 
 MU5系は専用のMIDI形式を使います。主な編集対象はXGです。パート数、音色マップ、エフェクト、A/D入力などの項目は機種と動作モードによって異なります。
 
+MU10ではMIDIでの個別編集・再生とXG RESETができます。本体設定の取得と、読み戻しで照合する一括送信は非対応です。本体設定を取得できる機種では、XG RESET後にその機種が対応する設定を取得します。
+
+## LCD表示
+
+対応機種はMU15、MU50、MU80、MU90、MU90R、MU100、MU100R、MU128、MU128 V2、MU1000／MU2000と各EX／EX R1です。MU128 V2とEX／EX R1には元機種のXG表示仕様を適用します。LCD表示は仕様書ベースで、実機表示は未確認です。LCDを搭載しないMU500では、編集・MIDIへの組み込みができます。
+
 ## ヤマハのMIDI資料
 
 - [MU500](https://data.yamaha.com/files/download/other_assets/8/316818/MU500J.PDF)
 - [MU1000 / MU2000](https://data.yamaha.com/files/download/other_assets/2/316512/MU2000J2.pdf)
 - [MU5](https://data.yamaha.com/files/download/other_assets/6/318376/MU5S.pdf)
+- [MU10](https://ca.yamaha.com/files/download/other_assets/5/318065/MU10E.pdf)
+- [MU15](https://data.yamaha.com/files/download/other_assets/2/318082/MU15E.pdf)
 - [MU50](https://data.yamaha.com/files/download/other_assets/2/318072/MU50E2.pdf)
 - [MU80](https://data.yamaha.com/files/download/other_assets/5/317065/MU80F2.pdf)
 - [MU90 / MU90R](https://data.yamaha.com/files/download/other_assets/8/316488/MU90RJ1.pdf)
